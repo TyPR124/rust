@@ -11,7 +11,7 @@ use rustc_index::vec::Idx;
 use rustc_middle::mir::interpret::{sign_extend, truncate};
 use rustc_middle::ty::layout::{IntegerExt, SizeSkeleton};
 use rustc_middle::ty::subst::SubstsRef;
-use rustc_middle::ty::{self, AdtKind, ParamEnv, Ty, TyCtxt, TypeFoldable};
+use rustc_middle::ty::{self, AdtKind, Ty, TypeFoldable};
 use rustc_span::source_map;
 use rustc_span::symbol::sym;
 use rustc_span::{Span, DUMMY_SP};
@@ -167,7 +167,8 @@ fn report_bin_hex_error(
              the type `{}` and will become `{}{}`",
             repr_str, val, t, actually, t
         ));
-        if let Some(sugg_ty) = get_type_suggestion(&cx.tables.node_type(expr.hir_id), val, negative)
+        if let Some(sugg_ty) =
+            get_type_suggestion(&cx.tables().node_type(expr.hir_id), val, negative)
         {
             if let Some(pos) = repr_str.chars().position(|c| c == 'i' || c == 'u') {
                 let (sans_suffix, _) = repr_str.split_at(pos);
@@ -301,7 +302,7 @@ fn lint_uint_literal<'a, 'tcx>(
         if let Node::Expr(par_e) = cx.tcx.hir().get(parent_id) {
             match par_e.kind {
                 hir::ExprKind::Cast(..) => {
-                    if let ty::Char = cx.tables.expr_ty(par_e).kind {
+                    if let ty::Char = cx.tables().expr_ty(par_e).kind {
                         cx.struct_span_lint(OVERFLOWING_LITERALS, par_e.span, |lint| {
                             lint.build("only `u8` can be cast into `char`")
                                 .span_suggestion(
@@ -352,7 +353,7 @@ fn lint_literal<'a, 'tcx>(
     e: &'tcx hir::Expr<'tcx>,
     lit: &hir::Lit,
 ) {
-    match cx.tables.node_type(e.hir_id).kind {
+    match cx.tables().node_type(e.hir_id).kind {
         ty::Int(t) => {
             match lit.node {
                 ast::LitKind::Int(v, ast::LitIntType::Signed(_) | ast::LitIntType::Unsuffixed) => {
@@ -448,7 +449,7 @@ impl<'a, 'tcx> LateLintPass<'a, 'tcx> for TypeLimits {
             // Normalize the binop so that the literal is always on the RHS in
             // the comparison
             let norm_binop = if swap { rev_binop(binop) } else { binop };
-            match cx.tables.node_type(expr.hir_id).kind {
+            match cx.tables().node_type(expr.hir_id).kind {
                 ty::Int(int_ty) => {
                     let (min, max) = int_ty_range(int_ty);
                     let lit_val: i128 = match lit.kind {
@@ -524,78 +525,82 @@ enum FfiResult<'tcx> {
     FfiUnsafe { ty: Ty<'tcx>, reason: String, help: Option<String> },
 }
 
-fn ty_is_known_nonnull<'tcx>(tcx: TyCtxt<'tcx>, ty: Ty<'tcx>) -> bool {
-    match ty.kind {
-        ty::FnPtr(_) => true,
-        ty::Ref(..) => true,
-        ty::Adt(field_def, substs) if field_def.repr.transparent() && !field_def.is_union() => {
-            for field in field_def.all_fields() {
-                let field_ty =
-                    tcx.normalize_erasing_regions(ParamEnv::reveal_all(), field.ty(tcx, substs));
-                if field_ty.is_zst(tcx, field.did) {
-                    continue;
-                }
-
-                let attrs = tcx.get_attrs(field_def.did);
-                if attrs.iter().any(|a| a.check_name(sym::rustc_nonnull_optimization_guaranteed))
-                    || ty_is_known_nonnull(tcx, field_ty)
-                {
-                    return true;
-                }
-            }
-
-            false
-        }
-        _ => false,
-    }
-}
-
-/// Check if this enum can be safely exported based on the
-/// "nullable pointer optimization". Currently restricted
-/// to function pointers, references, core::num::NonZero*,
-/// core::ptr::NonNull, and #[repr(transparent)] newtypes.
-/// FIXME: This duplicates code in codegen.
-fn is_repr_nullable_ptr<'tcx>(
-    tcx: TyCtxt<'tcx>,
-    ty: Ty<'tcx>,
-    ty_def: &'tcx ty::AdtDef,
-    substs: SubstsRef<'tcx>,
-) -> bool {
-    if ty_def.variants.len() != 2 {
-        return false;
-    }
-
-    let get_variant_fields = |index| &ty_def.variants[VariantIdx::new(index)].fields;
-    let variant_fields = [get_variant_fields(0), get_variant_fields(1)];
-    let fields = if variant_fields[0].is_empty() {
-        &variant_fields[1]
-    } else if variant_fields[1].is_empty() {
-        &variant_fields[0]
-    } else {
-        return false;
-    };
-
-    if fields.len() != 1 {
-        return false;
-    }
-
-    let field_ty = fields[0].ty(tcx, substs);
-    if !ty_is_known_nonnull(tcx, field_ty) {
-        return false;
-    }
-
-    // At this point, the field's type is known to be nonnull and the parent enum is Option-like.
-    // If the computed size for the field and the enum are different, the nonnull optimization isn't
-    // being applied (and we've got a problem somewhere).
-    let compute_size_skeleton = |t| SizeSkeleton::compute(t, tcx, ParamEnv::reveal_all()).unwrap();
-    if !compute_size_skeleton(ty).same_size(compute_size_skeleton(field_ty)) {
-        bug!("improper_ctypes: Option nonnull optimization not applied?");
-    }
-
-    true
-}
-
 impl<'a, 'tcx> ImproperCTypesVisitor<'a, 'tcx> {
+    /// Is type known to be non-null?
+    fn ty_is_known_nonnull(&self, ty: Ty<'tcx>) -> bool {
+        match ty.kind {
+            ty::FnPtr(_) => true,
+            ty::Ref(..) => true,
+            ty::Adt(field_def, substs) if field_def.repr.transparent() && !field_def.is_union() => {
+                for field in field_def.all_fields() {
+                    let field_ty = self.cx.tcx.normalize_erasing_regions(
+                        self.cx.param_env,
+                        field.ty(self.cx.tcx, substs),
+                    );
+                    if field_ty.is_zst(self.cx.tcx, field.did) {
+                        continue;
+                    }
+
+                    let attrs = self.cx.tcx.get_attrs(field_def.did);
+                    if attrs
+                        .iter()
+                        .any(|a| a.check_name(sym::rustc_nonnull_optimization_guaranteed))
+                        || self.ty_is_known_nonnull(field_ty)
+                    {
+                        return true;
+                    }
+                }
+
+                false
+            }
+            _ => false,
+        }
+    }
+
+    /// Check if this enum can be safely exported based on the "nullable pointer optimization".
+    /// Currently restricted to function pointers, references, `core::num::NonZero*`,
+    /// `core::ptr::NonNull`, and `#[repr(transparent)]` newtypes.
+    fn is_repr_nullable_ptr(
+        &self,
+        ty: Ty<'tcx>,
+        ty_def: &'tcx ty::AdtDef,
+        substs: SubstsRef<'tcx>,
+    ) -> bool {
+        if ty_def.variants.len() != 2 {
+            return false;
+        }
+
+        let get_variant_fields = |index| &ty_def.variants[VariantIdx::new(index)].fields;
+        let variant_fields = [get_variant_fields(0), get_variant_fields(1)];
+        let fields = if variant_fields[0].is_empty() {
+            &variant_fields[1]
+        } else if variant_fields[1].is_empty() {
+            &variant_fields[0]
+        } else {
+            return false;
+        };
+
+        if fields.len() != 1 {
+            return false;
+        }
+
+        let field_ty = fields[0].ty(self.cx.tcx, substs);
+        if !self.ty_is_known_nonnull(field_ty) {
+            return false;
+        }
+
+        // At this point, the field's type is known to be nonnull and the parent enum is
+        // Option-like. If the computed size for the field and the enum are different, the non-null
+        // optimization isn't being applied (and we've got a problem somewhere).
+        let compute_size_skeleton =
+            |t| SizeSkeleton::compute(t, self.cx.tcx, self.cx.param_env).unwrap();
+        if !compute_size_skeleton(ty).same_size(compute_size_skeleton(field_ty)) {
+            bug!("improper_ctypes: Option nonnull optimization not applied?");
+        }
+
+        true
+    }
+
     /// Check if the type is array and emit an unsafe type lint.
     fn check_for_array_ty(&mut self, sp: Span, ty: Ty<'tcx>) -> bool {
         if let ty::Array(..) = ty.kind {
@@ -737,7 +742,7 @@ impl<'a, 'tcx> ImproperCTypesVisitor<'a, 'tcx> {
                         // discriminant.
                         if !def.repr.c() && !def.repr.transparent() && def.repr.int.is_none() {
                             // Special-case types like `Option<extern fn()>`.
-                            if !is_repr_nullable_ptr(cx, ty, def, substs) {
+                            if !self.is_repr_nullable_ptr(ty, def, substs) {
                                 return FfiUnsafe {
                                     ty,
                                     reason: "enum has no representation hint".into(),

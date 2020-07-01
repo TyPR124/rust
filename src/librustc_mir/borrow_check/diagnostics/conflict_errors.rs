@@ -24,7 +24,8 @@ use crate::borrow_check::{
 };
 
 use super::{
-    explain_borrow::BorrowExplanation, IncludingDowncast, RegionName, RegionNameSource, UseSpans,
+    explain_borrow::BorrowExplanation, FnSelfUseKind, IncludingDowncast, RegionName,
+    RegionNameSource, UseSpans,
 };
 
 #[derive(Debug)]
@@ -150,13 +151,84 @@ impl<'cx, 'tcx> MirBorrowckCtxt<'cx, 'tcx> {
                         format!("value moved{} here, in previous iteration of loop", move_msg),
                     );
                 } else {
-                    err.span_label(move_span, format!("value moved{} here", move_msg));
-                    move_spans.var_span_label(
-                        &mut err,
-                        format!("variable moved due to use{}", move_spans.describe()),
+                    if let UseSpans::FnSelfUse { var_span, fn_call_span, fn_span, kind } =
+                        move_spans
+                    {
+                        let place_name = self
+                            .describe_place(moved_place.as_ref())
+                            .map(|n| format!("`{}`", n))
+                            .unwrap_or_else(|| "value".to_owned());
+                        match kind {
+                            FnSelfUseKind::FnOnceCall => {
+                                err.span_label(
+                                    fn_call_span,
+                                    &format!("{} moved due to this call", place_name),
+                                );
+                                err.span_note(
+                                    var_span,
+                                    "this value implements `FnOnce`, which causes it to be moved when called",
+                                );
+                            }
+                            FnSelfUseKind::Operator { self_arg } => {
+                                err.span_label(
+                                    fn_call_span,
+                                    &format!("{} moved due to usage in operator", place_name),
+                                );
+                                if self.fn_self_span_reported.insert(fn_span) {
+                                    err.span_note(
+                                        self_arg.span,
+                                        "calling this operator moves the left-hand side",
+                                    );
+                                }
+                            }
+                            FnSelfUseKind::Normal { self_arg, implicit_into_iter } => {
+                                if implicit_into_iter {
+                                    err.span_label(
+                                        fn_call_span,
+                                        &format!(
+                                            "{} moved due to this implicit call to `.into_iter()`",
+                                            place_name
+                                        ),
+                                    );
+                                } else {
+                                    err.span_label(
+                                        fn_call_span,
+                                        &format!("{} moved due to this method call", place_name),
+                                    );
+                                }
+                                // Avoid pointing to the same function in multiple different
+                                // error messages
+                                if self.fn_self_span_reported.insert(self_arg.span) {
+                                    err.span_note(
+                                        self_arg.span,
+                                        &format!("this function consumes the receiver `self` by taking ownership of it, which moves {}", place_name)
+                                    );
+                                }
+                            }
+                        }
+                    } else {
+                        err.span_label(move_span, format!("value moved{} here", move_msg));
+                        move_spans.var_span_label(
+                            &mut err,
+                            format!("variable moved due to use{}", move_spans.describe()),
+                        );
+                    }
+                }
+                if let UseSpans::PatUse(span) = move_spans {
+                    err.span_suggestion_verbose(
+                        span.shrink_to_lo(),
+                        &format!(
+                            "borrow this field in the pattern to avoid moving {}",
+                            self.describe_place(moved_place.as_ref())
+                                .map(|n| format!("`{}`", n))
+                                .unwrap_or_else(|| "the value".to_string())
+                        ),
+                        "ref ".to_string(),
+                        Applicability::MachineApplicable,
                     );
                 }
-                if Some(DesugaringKind::ForLoop) == move_span.desugaring_kind() {
+
+                if let Some(DesugaringKind::ForLoop(_)) = move_span.desugaring_kind() {
                     let sess = self.infcx.tcx.sess;
                     if let Ok(snippet) = sess.source_map().span_to_snippet(move_span) {
                         err.span_suggestion(
@@ -198,11 +270,28 @@ impl<'cx, 'tcx> MirBorrowckCtxt<'cx, 'tcx> {
                 _ => true,
             };
 
-            if needs_note {
-                let mpi = self.move_data.moves[move_out_indices[0]].path;
-                let place = &self.move_data.move_paths[mpi].place;
+            let mpi = self.move_data.moves[move_out_indices[0]].path;
+            let place = &self.move_data.move_paths[mpi].place;
+            let ty = place.ty(self.body, self.infcx.tcx).ty;
 
-                let ty = place.ty(self.body, self.infcx.tcx).ty;
+            if is_loop_move {
+                if let ty::Ref(_, _, hir::Mutability::Mut) = ty.kind {
+                    // We have a `&mut` ref, we need to reborrow on each iteration (#62112).
+                    err.span_suggestion_verbose(
+                        span.shrink_to_lo(),
+                        &format!(
+                            "consider creating a fresh reborrow of {} here",
+                            self.describe_place(moved_place)
+                                .map(|n| format!("`{}`", n))
+                                .unwrap_or_else(|| "the mutable reference".to_string()),
+                        ),
+                        "&mut *".to_string(),
+                        Applicability::MachineApplicable,
+                    );
+                }
+            }
+
+            if needs_note {
                 let opt_name =
                     self.describe_place_with_options(place.as_ref(), IncludingDowncast(true));
                 let note_msg = match opt_name {

@@ -4,7 +4,7 @@ use crate::module::DirectoryOwnership;
 use rustc_ast::ast::{self, Attribute, NodeId, PatKind};
 use rustc_ast::mut_visit::{self, MutVisitor};
 use rustc_ast::ptr::P;
-use rustc_ast::token;
+use rustc_ast::token::{self, FlattenGroup};
 use rustc_ast::tokenstream::{self, TokenStream, TokenTree};
 use rustc_ast::visit::{AssocCtxt, Visitor};
 use rustc_attr::{self as attr, Deprecation, HasAttrs, Stability};
@@ -142,7 +142,7 @@ impl Annotatable {
             | Annotatable::StructField(..)
             | Annotatable::Variant(..) => panic!("unexpected annotatable"),
         };
-        TokenTree::token(token::Interpolated(Lrc::new(nt)), DUMMY_SP).into()
+        TokenTree::token(token::Interpolated(Lrc::new(nt), FlattenGroup::Yes), DUMMY_SP).into()
     }
 
     pub fn expect_item(self) -> P<ast::Item> {
@@ -374,7 +374,7 @@ where
         impl MutVisitor for AvoidInterpolatedIdents {
             fn visit_tt(&mut self, tt: &mut tokenstream::TokenTree) {
                 if let tokenstream::TokenTree::Token(token) = tt {
-                    if let token::Interpolated(nt) = &token.kind {
+                    if let token::Interpolated(nt, _) = &token.kind {
                         if let token::NtIdent(ident, is_raw) = **nt {
                             *tt = tokenstream::TokenTree::token(
                                 token::Ident(ident.name, is_raw),
@@ -889,7 +889,7 @@ pub enum InvocationRes {
 /// Error type that denotes indeterminacy.
 pub struct Indeterminate;
 
-pub trait Resolver {
+pub trait ResolverExpand {
     fn next_node_id(&mut self) -> NodeId;
 
     fn resolve_dollar_crates(&mut self);
@@ -946,7 +946,7 @@ pub struct ExtCtxt<'a> {
     pub ecfg: expand::ExpansionConfig<'a>,
     pub reduced_recursion_limit: Option<Limit>,
     pub root_path: PathBuf,
-    pub resolver: &'a mut dyn Resolver,
+    pub resolver: &'a mut dyn ResolverExpand,
     pub current_expansion: ExpansionData,
     pub expansions: FxHashMap<Span, Vec<String>>,
     /// Called directly after having parsed an external `mod foo;` in expansion.
@@ -957,7 +957,7 @@ impl<'a> ExtCtxt<'a> {
     pub fn new(
         parse_sess: &'a ParseSess,
         ecfg: expand::ExpansionConfig<'a>,
-        resolver: &'a mut dyn Resolver,
+        resolver: &'a mut dyn ResolverExpand,
         extern_mod_loaded: Option<&'a dyn Fn(&ast::Crate)>,
     ) -> ExtCtxt<'a> {
         ExtCtxt {

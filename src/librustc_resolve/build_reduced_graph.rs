@@ -19,7 +19,7 @@ use rustc_ast::ast::{self, Block, ForeignItem, ForeignItemKind, Item, ItemKind, 
 use rustc_ast::ast::{AssocItem, AssocItemKind, MetaItemKind, StmtKind};
 use rustc_ast::token::{self, Token};
 use rustc_ast::visit::{self, AssocCtxt, Visitor};
-use rustc_ast_lowering::Resolver as ResolverAstLowering;
+use rustc_ast_lowering::ResolverAstLowering;
 use rustc_attr as attr;
 use rustc_data_structures::sync::Lrc;
 use rustc_errors::{struct_span_err, Applicability};
@@ -1325,7 +1325,7 @@ impl<'a, 'b> Visitor<'b> for BuildReducedGraphVisitor<'a, 'b> {
     }
 
     fn visit_token(&mut self, t: Token) {
-        if let token::Interpolated(nt) = t.kind {
+        if let token::Interpolated(nt, _) = t.kind {
             if let token::NtExpr(ref expr) = *nt {
                 if let ast::ExprKind::MacCall(..) = expr.kind {
                     self.visit_invoc(expr.id);

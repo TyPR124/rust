@@ -20,13 +20,13 @@ use filetime::FileTime;
 use serde::Deserialize;
 
 use crate::builder::Cargo;
-use crate::dist;
-use crate::native;
-use crate::util::{exe, is_dylib, symlink_dir};
-use crate::{Compiler, DependencyType, GitRepo, Mode};
-
 use crate::builder::{Builder, Kind, RunConfig, ShouldRun, Step};
 use crate::cache::{Interned, INTERNER};
+use crate::dist;
+use crate::native;
+use crate::tool::SourceType;
+use crate::util::{exe, is_dylib, symlink_dir};
+use crate::{Compiler, DependencyType, GitRepo, Mode};
 
 #[derive(Debug, PartialOrd, Ord, Copy, Clone, PartialEq, Eq, Hash)]
 pub struct Std {
@@ -87,7 +87,7 @@ impl Step for Std {
         target_deps.extend(copy_third_party_objects(builder, &compiler, target));
         target_deps.extend(copy_self_contained_objects(builder, &compiler, target));
 
-        let mut cargo = builder.cargo(compiler, Mode::Std, target, "build");
+        let mut cargo = builder.cargo(compiler, Mode::Std, SourceType::InTree, target, "build");
         std_cargo(builder, target, compiler.stage, &mut cargo);
 
         builder.info(&format!(
@@ -131,26 +131,13 @@ fn copy_third_party_objects(
     compiler: &Compiler,
     target: Interned<String>,
 ) -> Vec<(PathBuf, DependencyType)> {
-    let libdir = builder.sysroot_libdir(*compiler, target);
     let mut target_deps = vec![];
 
-    // Copies libunwind.a compiled to be linked with x86_64-fortanix-unknown-sgx.
-    //
-    // This target needs to be linked to Fortanix's port of llvm's libunwind.
-    // libunwind requires support for rwlock and printing to stderr,
-    // which is provided by std for this target.
+    // FIXME: remove this in 2021
     if target == "x86_64-fortanix-unknown-sgx" {
-        let src_path_env = "X86_FORTANIX_SGX_LIBS";
-        let src =
-            env::var(src_path_env).unwrap_or_else(|_| panic!("{} not found in env", src_path_env));
-        copy_and_stamp(
-            builder,
-            &*libdir,
-            Path::new(&src),
-            "libunwind.a",
-            &mut target_deps,
-            DependencyType::Target,
-        );
+        if env::var_os("X86_FORTANIX_SGX_LIBS").is_some() {
+            builder.info("Warning: X86_FORTANIX_SGX_LIBS environment variable is ignored, libunwind is now compiled as part of rustbuild");
+        }
     }
 
     if builder.config.sanitizers && compiler.stage != 0 {
@@ -190,7 +177,7 @@ fn copy_self_contained_objects(
     // To do that we have to distribute musl startup objects as a part of Rust toolchain
     // and link with them manually in the self-contained mode.
     if target.contains("musl") {
-        let srcdir = builder.musl_root(target).unwrap().join("lib");
+        let srcdir = builder.musl_libdir(target).unwrap();
         for &obj in &["crt1.o", "Scrt1.o", "rcrt1.o", "crti.o", "crtn.o"] {
             copy_and_stamp(
                 builder,
@@ -279,8 +266,8 @@ pub fn std_cargo(builder: &Builder<'_>, target: Interned<String>, stage: u32, ca
         // Help the libc crate compile by assisting it in finding various
         // sysroot native libraries.
         if target.contains("musl") {
-            if let Some(p) = builder.musl_root(target) {
-                let root = format!("native={}/lib", p.to_str().unwrap());
+            if let Some(p) = builder.musl_libdir(target) {
+                let root = format!("native={}", p.to_str().unwrap());
                 cargo.rustflag("-L").rustflag(&root);
             }
         }
@@ -513,7 +500,7 @@ impl Step for Rustc {
             target: builder.config.build,
         });
 
-        let mut cargo = builder.cargo(compiler, Mode::Rustc, target, "build");
+        let mut cargo = builder.cargo(compiler, Mode::Rustc, SourceType::InTree, target, "build");
         rustc_cargo(builder, &mut cargo, target);
 
         builder.info(&format!(

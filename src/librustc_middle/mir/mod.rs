@@ -146,14 +146,6 @@ pub struct Body<'tcx> {
     /// Debug information pertaining to user variables, including captures.
     pub var_debug_info: Vec<VarDebugInfo<'tcx>>,
 
-    /// Mark this MIR of a const context other than const functions as having converted a `&&` or
-    /// `||` expression into `&` or `|` respectively. This is problematic because if we ever stop
-    /// this conversion from happening and use short circuiting, we will cause the following code
-    /// to change the value of `x`: `let mut x = 42; false && { x = 55; true };`
-    ///
-    /// List of places where control flow was destroyed. Used for error reporting.
-    pub control_flow_destroyed: Vec<(Span, String)>,
-
     /// A span representing this MIR, for error reporting.
     pub span: Span,
 
@@ -183,7 +175,6 @@ impl<'tcx> Body<'tcx> {
         arg_count: usize,
         var_debug_info: Vec<VarDebugInfo<'tcx>>,
         span: Span,
-        control_flow_destroyed: Vec<(Span, String)>,
         generator_kind: Option<GeneratorKind>,
     ) -> Self {
         // We need `arg_count` locals, and one for the return place.
@@ -210,7 +201,6 @@ impl<'tcx> Body<'tcx> {
             span,
             required_consts: Vec::new(),
             ignore_interior_mut_in_const_validation: false,
-            control_flow_destroyed,
             predecessor_cache: PredecessorCache::new(),
         }
     }
@@ -234,7 +224,6 @@ impl<'tcx> Body<'tcx> {
             spread_arg: None,
             span: DUMMY_SP,
             required_consts: Vec::new(),
-            control_flow_destroyed: Vec::new(),
             generator_kind: None,
             var_debug_info: Vec::new(),
             ignore_interior_mut_in_const_validation: false,
@@ -1246,10 +1235,10 @@ pub enum TerminatorKind<'tcx> {
 #[derive(Clone, RustcEncodable, RustcDecodable, HashStable, PartialEq)]
 pub enum AssertKind<O> {
     BoundsCheck { len: O, index: O },
-    Overflow(BinOp),
-    OverflowNeg,
-    DivisionByZero,
-    RemainderByZero,
+    Overflow(BinOp, O, O),
+    OverflowNeg(O),
+    DivisionByZero(O),
+    RemainderByZero(O),
     ResumedAfterReturn(GeneratorKind),
     ResumedAfterPanic(GeneratorKind),
 }
@@ -1522,17 +1511,17 @@ impl<O> AssertKind<O> {
     pub fn description(&self) -> &'static str {
         use AssertKind::*;
         match self {
-            Overflow(BinOp::Add) => "attempt to add with overflow",
-            Overflow(BinOp::Sub) => "attempt to subtract with overflow",
-            Overflow(BinOp::Mul) => "attempt to multiply with overflow",
-            Overflow(BinOp::Div) => "attempt to divide with overflow",
-            Overflow(BinOp::Rem) => "attempt to calculate the remainder with overflow",
-            OverflowNeg => "attempt to negate with overflow",
-            Overflow(BinOp::Shr) => "attempt to shift right with overflow",
-            Overflow(BinOp::Shl) => "attempt to shift left with overflow",
-            Overflow(op) => bug!("{:?} cannot overflow", op),
-            DivisionByZero => "attempt to divide by zero",
-            RemainderByZero => "attempt to calculate the remainder with a divisor of zero",
+            Overflow(BinOp::Add, _, _) => "attempt to add with overflow",
+            Overflow(BinOp::Sub, _, _) => "attempt to subtract with overflow",
+            Overflow(BinOp::Mul, _, _) => "attempt to multiply with overflow",
+            Overflow(BinOp::Div, _, _) => "attempt to divide with overflow",
+            Overflow(BinOp::Rem, _, _) => "attempt to calculate the remainder with overflow",
+            OverflowNeg(_) => "attempt to negate with overflow",
+            Overflow(BinOp::Shr, _, _) => "attempt to shift right with overflow",
+            Overflow(BinOp::Shl, _, _) => "attempt to shift left with overflow",
+            Overflow(op, _, _) => bug!("{:?} cannot overflow", op),
+            DivisionByZero(_) => "attempt to divide by zero",
+            RemainderByZero(_) => "attempt to calculate the remainder with a divisor of zero",
             ResumedAfterReturn(GeneratorKind::Gen) => "generator resumed after completion",
             ResumedAfterReturn(GeneratorKind::Async(_)) => "`async fn` resumed after completion",
             ResumedAfterPanic(GeneratorKind::Gen) => "generator resumed after panicking",
@@ -1546,12 +1535,54 @@ impl<O> AssertKind<O> {
     where
         O: Debug,
     {
+        use AssertKind::*;
         match self {
-            AssertKind::BoundsCheck { ref len, ref index } => write!(
+            BoundsCheck { ref len, ref index } => write!(
                 f,
                 "\"index out of bounds: the len is {{}} but the index is {{}}\", {:?}, {:?}",
                 len, index
             ),
+
+            OverflowNeg(op) => {
+                write!(f, "\"attempt to negate {{}} which would overflow\", {:?}", op)
+            }
+            DivisionByZero(op) => write!(f, "\"attempt to divide {{}} by zero\", {:?}", op),
+            RemainderByZero(op) => write!(
+                f,
+                "\"attempt to calculate the remainder of {{}} with a divisor of zero\", {:?}",
+                op
+            ),
+            Overflow(BinOp::Add, l, r) => write!(
+                f,
+                "\"attempt to compute `{{}} + {{}}` which would overflow\", {:?}, {:?}",
+                l, r
+            ),
+            Overflow(BinOp::Sub, l, r) => write!(
+                f,
+                "\"attempt to compute `{{}} - {{}}` which would overflow\", {:?}, {:?}",
+                l, r
+            ),
+            Overflow(BinOp::Mul, l, r) => write!(
+                f,
+                "\"attempt to compute `{{}} * {{}}` which would overflow\", {:?}, {:?}",
+                l, r
+            ),
+            Overflow(BinOp::Div, l, r) => write!(
+                f,
+                "\"attempt to compute `{{}} / {{}}` which would overflow\", {:?}, {:?}",
+                l, r
+            ),
+            Overflow(BinOp::Rem, l, r) => write!(
+                f,
+                "\"attempt to compute the remainder of `{{}} % {{}}` which would overflow\", {:?}, {:?}",
+                l, r
+            ),
+            Overflow(BinOp::Shr, _, r) => {
+                write!(f, "\"attempt to shift right by {{}} which would overflow\", {:?}", r)
+            }
+            Overflow(BinOp::Shl, _, r) => {
+                write!(f, "\"attempt to shift left by {{}} which would overflow\", {:?}", r)
+            }
             _ => write!(f, "\"{}\"", self.description()),
         }
     }
@@ -1563,6 +1594,34 @@ impl<O: fmt::Debug> fmt::Debug for AssertKind<O> {
         match self {
             BoundsCheck { ref len, ref index } => {
                 write!(f, "index out of bounds: the len is {:?} but the index is {:?}", len, index)
+            }
+            OverflowNeg(op) => write!(f, "attempt to negate {:#?} which would overflow", op),
+            DivisionByZero(op) => write!(f, "attempt to divide {:#?} by zero", op),
+            RemainderByZero(op) => {
+                write!(f, "attempt to calculate the remainder of {:#?} with a divisor of zero", op)
+            }
+            Overflow(BinOp::Add, l, r) => {
+                write!(f, "attempt to compute `{:#?} + {:#?}` which would overflow", l, r)
+            }
+            Overflow(BinOp::Sub, l, r) => {
+                write!(f, "attempt to compute `{:#?} - {:#?}` which would overflow", l, r)
+            }
+            Overflow(BinOp::Mul, l, r) => {
+                write!(f, "attempt to compute `{:#?} * {:#?}` which would overflow", l, r)
+            }
+            Overflow(BinOp::Div, l, r) => {
+                write!(f, "attempt to compute `{:#?} / {:#?}` which would overflow", l, r)
+            }
+            Overflow(BinOp::Rem, l, r) => write!(
+                f,
+                "attempt to compute the remainder of `{:#?} % {:#?}` which would overflow",
+                l, r
+            ),
+            Overflow(BinOp::Shr, _, r) => {
+                write!(f, "attempt to shift right by {:#?} which would overflow", r)
+            }
+            Overflow(BinOp::Shl, _, r) => {
+                write!(f, "attempt to shift left by {:#?} which would overflow", r)
             }
             _ => write!(f, "{}", self.description()),
         }

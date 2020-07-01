@@ -301,16 +301,21 @@ pub enum Mode {
     /// Build codegen libraries, placing output in the "stageN-codegen" directory
     Codegen,
 
-    /// Build some tools, placing output in the "stageN-tools" directory. The
-    /// "other" here is for miscellaneous sets of tools that are built using the
-    /// bootstrap compiler in its entirety (target libraries and all).
-    /// Typically these tools compile with stable Rust.
+    /// Build a tool, placing output in the "stage0-bootstrap-tools"
+    /// directory. This is for miscellaneous sets of tools that are built
+    /// using the bootstrap stage0 compiler in its entirety (target libraries
+    /// and all). Typically these tools compile with stable Rust.
     ToolBootstrap,
 
-    /// Compile a tool which uses all libraries we compile (up to rustc).
-    /// Doesn't use the stage0 compiler libraries like "other", and includes
-    /// tools like rustdoc, cargo, rls, etc.
+    /// Build a tool which uses the locally built std, placing output in the
+    /// "stageN-tools" directory. Its usage is quite rare, mainly used by
+    /// compiletest which needs libtest.
     ToolStd,
+
+    /// Build a tool which uses the locally built rustc and the target std,
+    /// placing the output in the "stageN-tools" directory. This is used for
+    /// anything that needs a fully functional rustc, such as rustdoc, clippy,
+    /// cargo, rls, rustfmt, miri, etc.
     ToolRustc,
 }
 
@@ -881,6 +886,15 @@ impl Build {
             .and_then(|t| t.musl_root.as_ref())
             .or_else(|| self.config.musl_root.as_ref())
             .map(|p| &**p)
+    }
+
+    /// Returns the "musl libdir" for this `target`.
+    fn musl_libdir(&self, target: Interned<String>) -> Option<PathBuf> {
+        let t = self.config.target_config.get(&target)?;
+        if let libdir @ Some(_) = &t.musl_libdir {
+            return libdir.clone();
+        }
+        self.musl_root(target).map(|root| root.join("lib"))
     }
 
     /// Returns the sysroot for the wasi target, if defined

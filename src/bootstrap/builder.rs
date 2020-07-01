@@ -23,7 +23,7 @@ use crate::install;
 use crate::native;
 use crate::run;
 use crate::test;
-use crate::tool;
+use crate::tool::{self, SourceType};
 use crate::util::{self, add_dylib_path, add_link_lib_path, exe, libdir};
 use crate::{Build, DocTests, GitRepo, Mode};
 
@@ -759,6 +759,7 @@ impl<'a> Builder<'a> {
         &self,
         compiler: Compiler,
         mode: Mode,
+        source_type: SourceType,
         target: Interned<String>,
         cmd: &str,
     ) -> Cargo {
@@ -949,14 +950,6 @@ impl<'a> Builder<'a> {
             .env("RUSTC", self.out.join("bootstrap/debug/rustc"))
             .env("RUSTC_REAL", self.rustc(compiler))
             .env("RUSTC_STAGE", stage.to_string())
-            .env(
-                "RUSTC_DEBUG_ASSERTIONS",
-                if mode == Mode::Std {
-                    self.config.rust_debug_assertions_std.to_string()
-                } else {
-                    self.config.rust_debug_assertions.to_string()
-                },
-            )
             .env("RUSTC_SYSROOT", &sysroot)
             .env("RUSTC_LIBDIR", &libdir)
             .env("RUSTDOC", self.out.join("bootstrap/debug/rustdoc"))
@@ -1040,6 +1033,14 @@ impl<'a> Builder<'a> {
             }
         };
         cargo.env(profile_var("DEBUG"), debuginfo_level.to_string());
+        cargo.env(
+            profile_var("DEBUG_ASSERTIONS"),
+            if mode == Mode::Std {
+                self.config.rust_debug_assertions_std.to_string()
+            } else {
+                self.config.rust_debug_assertions.to_string()
+            },
+        );
 
         if !mode.is_tool() {
             cargo.env("RUSTC_FORCE_UNSTABLE", "1");
@@ -1125,7 +1126,7 @@ impl<'a> Builder<'a> {
 
         cargo.env("RUSTC_VERBOSE", self.verbosity.to_string());
 
-        if !mode.is_tool() {
+        if source_type == SourceType::InTree {
             // When extending this list, add the new lints to the RUSTFLAGS of the
             // build_bootstrap function of src/bootstrap/bootstrap.py as well as
             // some code doesn't go through this `rustc` wrapper.

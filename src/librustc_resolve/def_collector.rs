@@ -4,7 +4,7 @@ use rustc_ast::ast::*;
 use rustc_ast::token::{self, Token};
 use rustc_ast::visit::{self, FnKind};
 use rustc_ast::walk_list;
-use rustc_ast_lowering::Resolver as ResolverAstLowering;
+use rustc_ast_lowering::ResolverAstLowering;
 use rustc_expand::expand::AstFragment;
 use rustc_hir::def_id::LocalDefId;
 use rustc_hir::definitions::*;
@@ -256,7 +256,7 @@ impl<'a, 'b> visit::Visitor<'a> for DefCollector<'a, 'b> {
     }
 
     fn visit_token(&mut self, t: Token) {
-        if let token::Interpolated(nt) = t.kind {
+        if let token::Interpolated(nt, _) = t.kind {
             if let token::NtExpr(ref expr) = *nt {
                 if let ExprKind::MacCall(..) = expr.kind {
                     self.visit_macro_invoc(expr.id);

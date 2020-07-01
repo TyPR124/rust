@@ -9,7 +9,7 @@ use rustc_hir::def::Namespace;
 use rustc_macros::HashStable;
 use rustc_middle::ty::layout::{PrimitiveExt, TyAndLayout};
 use rustc_middle::ty::print::{FmtPrinter, PrettyPrinter, Printer};
-use rustc_middle::ty::Ty;
+use rustc_middle::ty::{ConstInt, Ty};
 use rustc_middle::{mir, ty};
 use rustc_target::abi::{Abi, HasDataLayout, LayoutOf, Size, TagEncoding};
 use rustc_target::abi::{VariantIdx, Variants};
@@ -206,6 +206,19 @@ impl<'tcx, Tag: Copy> ImmTy<'tcx, Tag> {
     #[inline]
     pub fn from_int(i: impl Into<i128>, layout: TyAndLayout<'tcx>) -> Self {
         Self::from_scalar(Scalar::from_int(i, layout.size), layout)
+    }
+
+    #[inline]
+    pub fn to_const_int(self) -> ConstInt {
+        assert!(self.layout.ty.is_integral());
+        ConstInt::new(
+            self.to_scalar()
+                .expect("to_const_int doesn't work on scalar pairs")
+                .assert_bits(self.layout.size),
+            self.layout.size,
+            self.layout.ty.is_signed(),
+            self.layout.ty.is_ptr_sized_integral(),
+        )
     }
 }
 
@@ -419,7 +432,11 @@ impl<'mir, 'tcx: 'mir, M: Machine<'mir, 'tcx>> InterpCx<'mir, 'tcx, M> {
         })
     }
 
-    /// This is used by [priroda](https://github.com/oli-obk/priroda) to get an OpTy from a local
+    /// Read from a local. Will not actually access the local if reading from a ZST.
+    /// Will not access memory, instead an indirect `Operand` is returned.
+    ///
+    /// This is public because it is used by [priroda](https://github.com/oli-obk/priroda) to get an
+    /// OpTy from a local
     pub fn access_local(
         &self,
         frame: &super::Frame<'mir, 'tcx, M::PointerTag, M::FrameExtra>,
@@ -475,6 +492,7 @@ impl<'mir, 'tcx: 'mir, M: Machine<'mir, 'tcx>> InterpCx<'mir, 'tcx, M> {
         // Sanity-check the type we ended up with.
         debug_assert!(mir_assign_valid_types(
             *self.tcx,
+            self.param_env,
             self.layout_of(self.subst_from_current_frame_and_normalize_erasing_regions(
                 place.ty(&self.frame().body.local_decls, *self.tcx).ty
             ))?,
@@ -557,7 +575,8 @@ impl<'mir, 'tcx: 'mir, M: Machine<'mir, 'tcx>> InterpCx<'mir, 'tcx, M> {
         // documentation).
         let val_val = M::adjust_global_const(self, val_val)?;
         // Other cases need layout.
-        let layout = from_known_layout(self.tcx, layout, || self.layout_of(val.ty))?;
+        let layout =
+            from_known_layout(self.tcx, self.param_env, layout, || self.layout_of(val.ty))?;
         let op = match val_val {
             ConstValue::ByRef { alloc, offset } => {
                 let id = self.tcx.create_memory_alloc(alloc);
