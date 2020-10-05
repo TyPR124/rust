@@ -53,6 +53,13 @@ pub static ref ALL_LINTS: Vec<Lint> = vec![
         module: "assign_ops",
     },
     Lint {
+        name: "async_yields_async",
+        group: "correctness",
+        desc: "async blocks that return a type that can be awaited",
+        deprecation: None,
+        module: "async_yields_async",
+    },
+    Lint {
         name: "await_holding_lock",
         group: "pedantic",
         desc: "Inside an async function, holding a MutexGuard while calling await",
@@ -79,6 +86,13 @@ pub static ref ALL_LINTS: Vec<Lint> = vec![
         desc: "usage of a blacklisted/placeholder name",
         deprecation: None,
         module: "blacklisted_name",
+    },
+    Lint {
+        name: "blanket_clippy_restriction_lints",
+        group: "style",
+        desc: "enabling the complete restriction group",
+        deprecation: None,
+        module: "attrs",
     },
     Lint {
         name: "blocks_in_if_conditions",
@@ -284,6 +298,13 @@ pub static ref ALL_LINTS: Vec<Lint> = vec![
         module: "copy_iterator",
     },
     Lint {
+        name: "create_dir",
+        group: "restriction",
+        desc: "calling `std::fs::create_dir` instead of `std::fs::create_dir_all`",
+        deprecation: None,
+        module: "create_dir",
+    },
+    Lint {
         name: "crosspointer_transmute",
         group: "complexity",
         desc: "transmutes that have to or from types that are a pointer to the other",
@@ -354,6 +375,13 @@ pub static ref ALL_LINTS: Vec<Lint> = vec![
         module: "derive",
     },
     Lint {
+        name: "derive_ord_xor_partial_ord",
+        group: "correctness",
+        desc: "deriving `Ord` but implementing `PartialOrd` explicitly",
+        deprecation: None,
+        module: "derive",
+    },
+    Lint {
         name: "diverging_sub_expression",
         group: "complexity",
         desc: "whether an expression contains a diverging sub expression",
@@ -394,13 +422,6 @@ pub static ref ALL_LINTS: Vec<Lint> = vec![
         desc: "Warn on unnecessary double parentheses",
         deprecation: None,
         module: "double_parens",
-    },
-    Lint {
-        name: "drop_bounds",
-        group: "correctness",
-        desc: "Bounds of the form `T: Drop` are useless",
-        deprecation: None,
-        module: "drop_bounds",
     },
     Lint {
         name: "drop_copy",
@@ -646,6 +667,13 @@ pub static ref ALL_LINTS: Vec<Lint> = vec![
         desc: "using `==` or `!=` on float constants instead of comparing difference with an epsilon",
         deprecation: None,
         module: "misc",
+    },
+    Lint {
+        name: "float_equality_without_abs",
+        group: "correctness",
+        desc: "float equality check without `.abs()`",
+        deprecation: None,
+        module: "float_equality_without_abs",
     },
     Lint {
         name: "fn_address_comparisons",
@@ -895,7 +923,7 @@ pub static ref ALL_LINTS: Vec<Lint> = vec![
     Lint {
         name: "invalid_atomic_ordering",
         group: "correctness",
-        desc: "usage of invalid atomic ordering in atomic loads/stores and memory fences",
+        desc: "usage of invalid atomic ordering in atomic operations and memory fences",
         deprecation: None,
         module: "atomic_ordering",
     },
@@ -1023,7 +1051,7 @@ pub static ref ALL_LINTS: Vec<Lint> = vec![
         group: "style",
         desc: "creating a let-binding and then immediately returning it like `let x = expr; x` at the end of a block",
         deprecation: None,
-        module: "let_and_return",
+        module: "returns",
     },
     Lint {
         name: "let_underscore_lock",
@@ -1110,6 +1138,13 @@ pub static ref ALL_LINTS: Vec<Lint> = vec![
         module: "methods",
     },
     Lint {
+        name: "manual_strip",
+        group: "complexity",
+        desc: "suggests using `strip_{prefix,suffix}` over `str::{starts,ends}_with` and slicing",
+        deprecation: None,
+        module: "manual_strip",
+    },
+    Lint {
         name: "manual_swap",
         group: "complexity",
         desc: "manual swap of two variables",
@@ -1138,11 +1173,25 @@ pub static ref ALL_LINTS: Vec<Lint> = vec![
         module: "entry",
     },
     Lint {
+        name: "map_err_ignore",
+        group: "pedantic",
+        desc: "`map_err` should not ignore the original error",
+        deprecation: None,
+        module: "map_err_ignore",
+    },
+    Lint {
         name: "map_flatten",
         group: "pedantic",
         desc: "using combinations of `flatten` and `map` which can usually be written as a single method call",
         deprecation: None,
         module: "methods",
+    },
+    Lint {
+        name: "map_identity",
+        group: "complexity",
+        desc: "using iterator.map(|x| x)",
+        deprecation: None,
+        module: "map_identity",
     },
     Lint {
         name: "map_unwrap_or",
@@ -1162,6 +1211,13 @@ pub static ref ALL_LINTS: Vec<Lint> = vec![
         name: "match_bool",
         group: "pedantic",
         desc: "a `match` on a boolean expression instead of an `if..else` block",
+        deprecation: None,
+        module: "matches",
+    },
+    Lint {
+        name: "match_like_matches_macro",
+        group: "style",
+        desc: "a match that could be written with the matches! macro",
         deprecation: None,
         module: "matches",
     },
@@ -1432,6 +1488,13 @@ pub static ref ALL_LINTS: Vec<Lint> = vec![
         module: "bytecount",
     },
     Lint {
+        name: "needless_arbitrary_self_type",
+        group: "complexity",
+        desc: "type of `self` parameter is already by default `Self`",
+        deprecation: None,
+        module: "needless_arbitrary_self_type",
+    },
+    Lint {
         name: "needless_bool",
         group: "complexity",
         desc: "if-statements with plain booleans in the then- and else-clause, e.g., `if p { true } else { false }`",
@@ -1607,6 +1670,13 @@ pub static ref ALL_LINTS: Vec<Lint> = vec![
         module: "option_env_unwrap",
     },
     Lint {
+        name: "option_if_let_else",
+        group: "pedantic",
+        desc: "reimplementation of Option::map_or",
+        deprecation: None,
+        module: "option_if_let_else",
+    },
+    Lint {
         name: "option_map_or_none",
         group: "style",
         desc: "using `Option.map_or(None, f)`, which is more succinctly expressed as `and_then(f)`",
@@ -1656,6 +1726,13 @@ pub static ref ALL_LINTS: Vec<Lint> = vec![
         module: "panic_unimplemented",
     },
     Lint {
+        name: "panic_in_result_fn",
+        group: "restriction",
+        desc: "functions of type `Result<..>` that contain `panic!()`, `todo!()` or `unreachable()` or `unimplemented()` ",
+        deprecation: None,
+        module: "panic_in_result_fn",
+    },
+    Lint {
         name: "panic_params",
         group: "style",
         desc: "missing parameters in `panic!` calls",
@@ -1682,6 +1759,13 @@ pub static ref ALL_LINTS: Vec<Lint> = vec![
         desc: "calling `push` with file system root on `PathBuf` can overwrite it",
         deprecation: None,
         module: "path_buf_push_overwrite",
+    },
+    Lint {
+        name: "pattern_type_mismatch",
+        group: "restriction",
+        desc: "type of pattern does not match the expression type",
+        deprecation: None,
+        module: "pattern_type_mismatch",
     },
     Lint {
         name: "possible_missing_comma",
@@ -1755,7 +1839,7 @@ pub static ref ALL_LINTS: Vec<Lint> = vec![
     },
     Lint {
         name: "range_minus_one",
-        group: "complexity",
+        group: "pedantic",
         desc: "`x..=(y-1)` reads better as `x..y`",
         deprecation: None,
         module: "ranges",
@@ -1773,6 +1857,13 @@ pub static ref ALL_LINTS: Vec<Lint> = vec![
         desc: "zipping iterator with a range when `enumerate()` would do",
         deprecation: None,
         module: "ranges",
+    },
+    Lint {
+        name: "rc_buffer",
+        group: "perf",
+        desc: "shared ownership of a buffer type",
+        deprecation: None,
+        module: "types",
     },
     Lint {
         name: "redundant_allocation",
@@ -1800,7 +1891,7 @@ pub static ref ALL_LINTS: Vec<Lint> = vec![
         group: "complexity",
         desc: "throwaway closures called in the expression they are defined",
         deprecation: None,
-        module: "misc_early",
+        module: "redundant_closure_call",
     },
     Lint {
         name: "redundant_closure_for_method_calls",
@@ -1828,7 +1919,7 @@ pub static ref ALL_LINTS: Vec<Lint> = vec![
         group: "style",
         desc: "use the proper utility function avoiding an `if let`",
         deprecation: None,
-        module: "redundant_pattern_matching",
+        module: "matches",
     },
     Lint {
         name: "redundant_pub_crate",
@@ -1852,11 +1943,11 @@ pub static ref ALL_LINTS: Vec<Lint> = vec![
         module: "reference",
     },
     Lint {
-        name: "regex_macro",
-        group: "style",
-        desc: "use of `regex!(_)` instead of `Regex::new(_)`",
+        name: "repeat_once",
+        group: "complexity",
+        desc: "using `.repeat(1)` instead of `String.clone()`, `str.to_string()` or `slice.to_vec()` ",
         deprecation: None,
-        module: "regex",
+        module: "repeat_once",
     },
     Lint {
         name: "rest_pat_in_fully_bound_structs",
@@ -1894,11 +1985,25 @@ pub static ref ALL_LINTS: Vec<Lint> = vec![
         module: "copies",
     },
     Lint {
+        name: "same_item_push",
+        group: "style",
+        desc: "the same item is pushed inside of a for loop",
+        deprecation: None,
+        module: "loops",
+    },
+    Lint {
         name: "search_is_some",
         group: "complexity",
         desc: "using an iterator search followed by `is_some()`, which is more succinctly expressed as a call to `any()`",
         deprecation: None,
         module: "methods",
+    },
+    Lint {
+        name: "self_assignment",
+        group: "correctness",
+        desc: "explicit self-assignment",
+        deprecation: None,
+        module: "self_assignment",
     },
     Lint {
         name: "serde_api_misuse",
@@ -1957,6 +2062,13 @@ pub static ref ALL_LINTS: Vec<Lint> = vec![
         module: "methods",
     },
     Lint {
+        name: "single_char_push_str",
+        group: "style",
+        desc: "`push_str()` used with a single-character string literal as parameter",
+        deprecation: None,
+        module: "methods",
+    },
+    Lint {
         name: "single_component_path_imports",
         group: "style",
         desc: "imports with single component path are redundant",
@@ -1990,6 +2102,13 @@ pub static ref ALL_LINTS: Vec<Lint> = vec![
         desc: "slow vector initialization",
         deprecation: None,
         module: "slow_vector_initialization",
+    },
+    Lint {
+        name: "stable_sort_primitive",
+        group: "perf",
+        desc: "use of sort() when sort_unstable() is equivalent",
+        deprecation: None,
+        module: "stable_sort_primitive",
     },
     Lint {
         name: "string_add",
@@ -2104,6 +2223,13 @@ pub static ref ALL_LINTS: Vec<Lint> = vec![
         module: "to_digit_is_some",
     },
     Lint {
+        name: "to_string_in_display",
+        group: "correctness",
+        desc: "`to_string` method used while implementing `Display` trait",
+        deprecation: None,
+        module: "to_string_in_display",
+    },
+    Lint {
         name: "todo",
         group: "restriction",
         desc: "`todo!` should not be present in production code",
@@ -2130,6 +2256,13 @@ pub static ref ALL_LINTS: Vec<Lint> = vec![
         desc: "an entire binding declared as `ref`, in a function argument or a `let` statement",
         deprecation: None,
         module: "misc",
+    },
+    Lint {
+        name: "trait_duplication_in_bounds",
+        group: "pedantic",
+        desc: "Check if the same trait bounds are specified twice during a function declaration",
+        deprecation: None,
+        module: "trait_bounds",
     },
     Lint {
         name: "transmute_bytes_to_str",
@@ -2177,6 +2310,13 @@ pub static ref ALL_LINTS: Vec<Lint> = vec![
         name: "transmute_ptr_to_ref",
         group: "complexity",
         desc: "transmutes from a pointer to a reference type",
+        deprecation: None,
+        module: "transmute",
+    },
+    Lint {
+        name: "transmutes_expressible_as_ptr_casts",
+        group: "complexity",
+        desc: "transmutes that could be a pointer cast",
         deprecation: None,
         module: "transmute",
     },
@@ -2258,6 +2398,13 @@ pub static ref ALL_LINTS: Vec<Lint> = vec![
         module: "types",
     },
     Lint {
+        name: "unit_return_expecting_ord",
+        group: "correctness",
+        desc: "fn arguments of type Fn(...) -> Ord returning the unit type ().",
+        deprecation: None,
+        module: "unit_return_expecting_ord",
+    },
+    Lint {
         name: "unknown_clippy_lints",
         group: "style",
         desc: "unknown_lints for scoped Clippy lints",
@@ -2282,6 +2429,13 @@ pub static ref ALL_LINTS: Vec<Lint> = vec![
         name: "unnecessary_fold",
         group: "style",
         desc: "using `fold` when a more succinct alternative exists",
+        deprecation: None,
+        module: "methods",
+    },
+    Lint {
+        name: "unnecessary_lazy_evaluations",
+        group: "style",
+        desc: "using unnecessary lazy evaluation, which can be replaced with simpler eager evaluation",
         deprecation: None,
         module: "methods",
     },
@@ -2395,7 +2549,14 @@ pub static ref ALL_LINTS: Vec<Lint> = vec![
         group: "style",
         desc: "needless unit expression",
         deprecation: None,
-        module: "returns",
+        module: "unused_unit",
+    },
+    Lint {
+        name: "unwrap_in_result",
+        group: "restriction",
+        desc: "functions of type `Result<..>` or `Option`<...> that contain `expect()` or `unwrap()`",
+        deprecation: None,
+        module: "unwrap_in_result",
     },
     Lint {
         name: "unwrap_used",
@@ -2414,7 +2575,7 @@ pub static ref ALL_LINTS: Vec<Lint> = vec![
     Lint {
         name: "use_self",
         group: "nursery",
-        desc: "Unnecessary structure name repetition whereas `Self` is applicable",
+        desc: "unnecessary structure name repetition whereas `Self` is applicable",
         deprecation: None,
         module: "use_self",
     },
@@ -2490,7 +2651,7 @@ pub static ref ALL_LINTS: Vec<Lint> = vec![
     },
     Lint {
         name: "verbose_bit_mask",
-        group: "style",
+        group: "pedantic",
         desc: "expressions where a bit mask is less readable than the corresponding method call",
         deprecation: None,
         module: "bit_mask",

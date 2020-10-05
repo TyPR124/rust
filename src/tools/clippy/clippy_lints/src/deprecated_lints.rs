@@ -153,5 +153,22 @@ declare_deprecated_lint! {
     ///
     /// **Deprecation reason:** Associated-constants are now preferred.
     pub REPLACE_CONSTS,
-    "associated-constants `MIN`/`MAX` of integers are prefer to `{min,max}_value()` and module constants"
+    "associated-constants `MIN`/`MAX` of integers are preferred to `{min,max}_value()` and module constants"
+}
+
+declare_deprecated_lint! {
+    /// **What it does:** Nothing. This lint has been deprecated.
+    ///
+    /// **Deprecation reason:** The regex! macro does not exist anymore.
+    pub REGEX_MACRO,
+    "the regex! macro has been removed from the regex crate in 2018"
+}
+
+declare_deprecated_lint! {
+    /// **What it does:** Nothing. This lint has been deprecated.
+    ///
+    /// **Deprecation reason:** This lint has been uplifted to rustc and is now called
+    /// `drop_bounds`.
+    pub DROP_BOUNDS,
+    "this lint has been uplifted to rustc and is now called `drop_bounds`"
 }

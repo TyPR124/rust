@@ -3,16 +3,14 @@
 
 use rustc_hir::def_id::{DefId, DefIdSet};
 use rustc_middle::middle::privacy::AccessLevels;
-use rustc_session::lint;
 use rustc_span::{InnerSpan, Span, DUMMY_SP};
 use std::mem;
 use std::ops::Range;
 
 use self::Condition::*;
-use crate::clean::{self, GetDefId, Item};
+use crate::clean::{self, DocFragmentKind, GetDefId, Item};
 use crate::core::DocContext;
 use crate::fold::{DocFolder, StripItem};
-use crate::html::markdown::{find_testable_code, ErrorCodes, LangString};
 
 mod collapse_docs;
 pub use self::collapse_docs::COLLAPSE_DOCS;
@@ -35,8 +33,8 @@ pub use self::propagate_doc_cfg::PROPAGATE_DOC_CFG;
 mod collect_intra_doc_links;
 pub use self::collect_intra_doc_links::COLLECT_INTRA_DOC_LINKS;
 
-mod private_items_doc_tests;
-pub use self::private_items_doc_tests::CHECK_PRIVATE_ITEMS_DOC_TESTS;
+mod doc_test_lints;
+pub use self::doc_test_lints::CHECK_PRIVATE_ITEMS_DOC_TESTS;
 
 mod collect_trait_impls;
 pub use self::collect_trait_impls::COLLECT_TRAIT_IMPLS;
@@ -286,8 +284,7 @@ impl<'a> DocFolder for ImplStripper<'a> {
                     if let Some(did) = typaram.def_id() {
                         if did.is_local() && !self.retained.contains(&did) {
                             debug!(
-                                "ImplStripper: stripped item in trait's generics; \
-                                    removing impl"
+                                "ImplStripper: stripped item in trait's generics; removing impl"
                             );
                             return None;
                         }
@@ -312,62 +309,16 @@ impl DocFolder for ImportStripper {
     }
 }
 
-pub fn look_for_tests<'tcx>(
-    cx: &DocContext<'tcx>,
-    dox: &str,
-    item: &Item,
-    check_missing_code: bool,
-) {
-    let hir_id = match cx.as_local_hir_id(item.def_id) {
-        Some(hir_id) => hir_id,
-        None => {
-            // If non-local, no need to check anything.
-            return;
-        }
-    };
-
-    struct Tests {
-        found_tests: usize,
-    }
-
-    impl crate::test::Tester for Tests {
-        fn add_test(&mut self, _: String, _: LangString, _: usize) {
-            self.found_tests += 1;
-        }
-    }
-
-    let mut tests = Tests { found_tests: 0 };
-
-    find_testable_code(&dox, &mut tests, ErrorCodes::No, false, None);
-
-    if check_missing_code && tests.found_tests == 0 {
-        let sp = span_of_attrs(&item.attrs).unwrap_or(item.source.span());
-        cx.tcx.struct_span_lint_hir(lint::builtin::MISSING_DOC_CODE_EXAMPLES, hir_id, sp, |lint| {
-            lint.build("missing code example in this documentation").emit()
-        });
-    } else if !check_missing_code
-        && tests.found_tests > 0
-        && !cx.renderinfo.borrow().access_levels.is_public(item.def_id)
-    {
-        cx.tcx.struct_span_lint_hir(
-            lint::builtin::PRIVATE_DOC_TESTS,
-            hir_id,
-            span_of_attrs(&item.attrs).unwrap_or(item.source.span()),
-            |lint| lint.build("documentation test in private item").emit(),
-        );
-    }
-}
-
 /// Returns a span encompassing all the given attributes.
 crate fn span_of_attrs(attrs: &clean::Attributes) -> Option<Span> {
     if attrs.doc_strings.is_empty() {
         return None;
     }
-    let start = attrs.doc_strings[0].span();
+    let start = attrs.doc_strings[0].span;
     if start == DUMMY_SP {
         return None;
     }
-    let end = attrs.doc_strings.last().expect("no doc strings provided").span();
+    let end = attrs.doc_strings.last().expect("no doc strings provided").span;
     Some(start.to(end))
 }
 
@@ -382,10 +333,8 @@ crate fn source_span_for_markdown_range(
     md_range: &Range<usize>,
     attrs: &clean::Attributes,
 ) -> Option<Span> {
-    let is_all_sugared_doc = attrs.doc_strings.iter().all(|frag| match frag {
-        clean::DocFragment::SugaredDoc(..) => true,
-        _ => false,
-    });
+    let is_all_sugared_doc =
+        attrs.doc_strings.iter().all(|frag| frag.kind == DocFragmentKind::SugaredDoc);
 
     if !is_all_sugared_doc {
         return None;

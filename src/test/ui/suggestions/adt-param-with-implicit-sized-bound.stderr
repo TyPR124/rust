@@ -1,16 +1,14 @@
 error[E0277]: the size for values of type `T` cannot be known at compilation time
-  --> $DIR/adt-param-with-implicit-sized-bound.rs:25:5
+  --> $DIR/adt-param-with-implicit-sized-bound.rs:25:9
    |
 LL | struct X<T>(T);
    |          - required by this bound in `X`
 ...
 LL | struct Struct5<T: ?Sized>{
-   |                - this type parameter needs to be `std::marker::Sized`
+   |                - this type parameter needs to be `Sized`
 LL |     _t: X<T>,
-   |     ^^^^^^^^ doesn't have a size known at compile-time
+   |         ^^^^ doesn't have a size known at compile-time
    |
-   = help: the trait `std::marker::Sized` is not implemented for `T`
-   = note: to learn more, visit <https://doc.rust-lang.org/book/ch19-04-advanced-types.html#dynamically-sized-types-and-the-sized-trait>
 help: you could relax the implicit `Sized` bound on `T` if it were used through indirection like `&T` or `Box<T>`
   --> $DIR/adt-param-with-implicit-sized-bound.rs:18:10
    |
@@ -28,12 +26,10 @@ LL |     fn func1() -> Struct1<Self>;
 LL | struct Struct1<T>{
    |                - required by this bound in `Struct1`
    |
-   = help: the trait `std::marker::Sized` is not implemented for `Self`
-   = note: to learn more, visit <https://doc.rust-lang.org/book/ch19-04-advanced-types.html#dynamically-sized-types-and-the-sized-trait>
 help: consider further restricting `Self`
    |
-LL |     fn func1() -> Struct1<Self> where Self: std::marker::Sized;
-   |                                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+LL |     fn func1() -> Struct1<Self> where Self: Sized;
+   |                                 ^^^^^^^^^^^^^^^^^
 help: consider relaxing the implicit `Sized` restriction
    |
 LL | struct Struct1<T: ?Sized>{
@@ -48,12 +44,10 @@ LL |     fn func2<'a>() -> Struct2<'a, Self>;
 LL | struct Struct2<'a, T>{
    |                    - required by this bound in `Struct2`
    |
-   = help: the trait `std::marker::Sized` is not implemented for `Self`
-   = note: to learn more, visit <https://doc.rust-lang.org/book/ch19-04-advanced-types.html#dynamically-sized-types-and-the-sized-trait>
 help: consider further restricting `Self`
    |
-LL |     fn func2<'a>() -> Struct2<'a, Self> where Self: std::marker::Sized;
-   |                                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+LL |     fn func2<'a>() -> Struct2<'a, Self> where Self: Sized;
+   |                                         ^^^^^^^^^^^^^^^^^
 help: consider relaxing the implicit `Sized` restriction
    |
 LL | struct Struct2<'a, T: ?Sized>{
@@ -68,8 +62,6 @@ LL |     fn func3() -> Struct3<Self>;
 LL | struct Struct3<T>{
    |                - required by this bound in `Struct3`
    |
-   = help: the trait `std::marker::Sized` is not implemented for `Self`
-   = note: to learn more, visit <https://doc.rust-lang.org/book/ch19-04-advanced-types.html#dynamically-sized-types-and-the-sized-trait>
 help: you could relax the implicit `Sized` bound on `T` if it were used through indirection like `&T` or `Box<T>`
   --> $DIR/adt-param-with-implicit-sized-bound.rs:14:16
    |
@@ -79,8 +71,8 @@ LL |     _t: T,
    |         - ...if indirection was used here: `Box<T>`
 help: consider further restricting `Self`
    |
-LL |     fn func3() -> Struct3<Self> where Self: std::marker::Sized;
-   |                                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+LL |     fn func3() -> Struct3<Self> where Self: Sized;
+   |                                 ^^^^^^^^^^^^^^^^^
 
 error[E0277]: the size for values of type `Self` cannot be known at compilation time
   --> $DIR/adt-param-with-implicit-sized-bound.rs:5:19
@@ -91,12 +83,10 @@ LL |     fn func4() -> Struct4<Self>;
 LL | struct Struct4<T>{
    |                - required by this bound in `Struct4`
    |
-   = help: the trait `std::marker::Sized` is not implemented for `Self`
-   = note: to learn more, visit <https://doc.rust-lang.org/book/ch19-04-advanced-types.html#dynamically-sized-types-and-the-sized-trait>
 help: consider further restricting `Self`
    |
-LL |     fn func4() -> Struct4<Self> where Self: std::marker::Sized;
-   |                                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+LL |     fn func4() -> Struct4<Self> where Self: Sized;
+   |                                 ^^^^^^^^^^^^^^^^^
 help: consider relaxing the implicit `Sized` restriction
    |
 LL | struct Struct4<T: ?Sized>{

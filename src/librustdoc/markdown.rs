@@ -7,10 +7,10 @@ use rustc_span::edition::Edition;
 use rustc_span::source_map::DUMMY_SP;
 
 use crate::config::{Options, RenderOptions};
+use crate::doctest::{Collector, TestOptions};
 use crate::html::escape::Escape;
 use crate::html::markdown;
 use crate::html::markdown::{find_testable_code, ErrorCodes, IdMap, Markdown, MarkdownWithToc};
-use crate::test::{Collector, TestOptions};
 
 /// Separate any lines at the start of the file that begin with `# ` or `%`.
 fn extract_leading_metadata(s: &str) -> (Vec<&str>, &str) {
@@ -68,9 +68,9 @@ pub fn render<P: AsRef<Path>>(
     let mut ids = IdMap::new();
     let error_codes = ErrorCodes::from(UnstableFeatures::from_environment().is_nightly_build());
     let text = if !options.markdown_no_toc {
-        MarkdownWithToc(text, &mut ids, error_codes, edition, &playground).to_string()
+        MarkdownWithToc(text, &mut ids, error_codes, edition, &playground).into_string()
     } else {
-        Markdown(text, &[], &mut ids, error_codes, edition, &playground).to_string()
+        Markdown(text, &[], &mut ids, error_codes, edition, &playground).into_string()
     };
 
     let err = write!(

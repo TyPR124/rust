@@ -4,7 +4,7 @@ use rustc_hir::intravisit::FnKind;
 use rustc_hir::{Body, Constness, FnDecl, GenericParamKind, HirId};
 use rustc_lint::{LateContext, LateLintPass};
 use rustc_middle::lint::in_external_macro;
-use rustc_mir::transform::qualify_min_const_fn::is_min_const_fn;
+use crate::utils::qualify_min_const_fn::is_min_const_fn;
 use rustc_session::{declare_lint_pass, declare_tool_lint};
 use rustc_span::Span;
 use rustc_typeck::hir_ty_to_ty;
@@ -71,10 +71,10 @@ declare_clippy_lint! {
 
 declare_lint_pass!(MissingConstForFn => [MISSING_CONST_FOR_FN]);
 
-impl<'a, 'tcx> LateLintPass<'a, 'tcx> for MissingConstForFn {
+impl<'tcx> LateLintPass<'tcx> for MissingConstForFn {
     fn check_fn(
         &mut self,
-        cx: &LateContext<'_, '_>,
+        cx: &LateContext<'_>,
         kind: FnKind<'_>,
         _: &FnDecl<'_>,
         _: &Body<'_>,
@@ -118,7 +118,7 @@ impl<'a, 'tcx> LateLintPass<'a, 'tcx> for MissingConstForFn {
 
         let mir = cx.tcx.optimized_mir(def_id);
 
-        if let Err((span, err)) = is_min_const_fn(cx.tcx, def_id.to_def_id(), &mir) {
+        if let Err((span, err)) = is_min_const_fn(cx.tcx, &mir) {
             if rustc_mir::const_eval::is_min_const_fn(cx.tcx, def_id.to_def_id()) {
                 cx.tcx.sess.span_err(span, &err);
             }
@@ -130,8 +130,8 @@ impl<'a, 'tcx> LateLintPass<'a, 'tcx> for MissingConstForFn {
 
 /// Returns true if any of the method parameters is a type that implements `Drop`. The method
 /// can't be made const then, because `drop` can't be const-evaluated.
-fn method_accepts_dropable(cx: &LateContext<'_, '_>, param_tys: &[hir::Ty<'_>]) -> bool {
-    // If any of the params are dropable, return true
+fn method_accepts_dropable(cx: &LateContext<'_>, param_tys: &[hir::Ty<'_>]) -> bool {
+    // If any of the params are droppable, return true
     param_tys.iter().any(|hir_ty| {
         let ty_ty = hir_ty_to_ty(cx.tcx, hir_ty);
         has_drop(cx, ty_ty)

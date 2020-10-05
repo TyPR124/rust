@@ -7,5 +7,7 @@
 #[warn(clippy::invalid_ref)]
 #[warn(clippy::into_iter_on_array)]
 #[warn(clippy::unused_label)]
+#[warn(clippy::regex_macro)]
+#[warn(clippy::drop_bounds)]
 
 fn main() {}

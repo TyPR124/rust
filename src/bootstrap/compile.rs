@@ -22,6 +22,7 @@ use serde::Deserialize;
 use crate::builder::Cargo;
 use crate::builder::{Builder, Kind, RunConfig, ShouldRun, Step};
 use crate::cache::{Interned, INTERNER};
+use crate::config::TargetSelection;
 use crate::dist;
 use crate::native;
 use crate::tool::SourceType;
@@ -30,7 +31,7 @@ use crate::{Compiler, DependencyType, GitRepo, Mode};
 
 #[derive(Debug, PartialOrd, Ord, Copy, Clone, PartialEq, Eq, Hash)]
 pub struct Std {
-    pub target: Interned<String>,
+    pub target: TargetSelection,
     pub compiler: Compiler,
 }
 
@@ -44,7 +45,7 @@ impl Step for Std {
 
     fn make_run(run: RunConfig<'_>) {
         run.builder.ensure(Std {
-            compiler: run.builder.compiler(run.builder.top_stage, run.host),
+            compiler: run.builder.compiler(run.builder.top_stage, run.build_triple()),
             target: run.target,
         });
     }
@@ -58,7 +59,9 @@ impl Step for Std {
         let target = self.target;
         let compiler = self.compiler;
 
-        if builder.config.keep_stage.contains(&compiler.stage) {
+        if builder.config.keep_stage.contains(&compiler.stage)
+            || builder.config.keep_stage_std.contains(&compiler.stage)
+        {
             builder.info("Warning: Using a potentially old libstd. This may not behave well.");
             builder.ensure(StdLink { compiler, target_compiler: compiler, target });
             return;
@@ -129,7 +132,7 @@ fn copy_and_stamp(
 fn copy_third_party_objects(
     builder: &Builder<'_>,
     compiler: &Compiler,
-    target: Interned<String>,
+    target: TargetSelection,
 ) -> Vec<(PathBuf, DependencyType)> {
     let mut target_deps = vec![];
 
@@ -157,15 +160,9 @@ fn copy_third_party_objects(
 fn copy_self_contained_objects(
     builder: &Builder<'_>,
     compiler: &Compiler,
-    target: Interned<String>,
+    target: TargetSelection,
 ) -> Vec<(PathBuf, DependencyType)> {
-    // cfg(bootstrap)
-    // Remove when upgrading bootstrap compiler.
-    let libdir_self_contained = if compiler.stage == 0 {
-        builder.sysroot_libdir(*compiler, target).to_path_buf()
-    } else {
-        builder.sysroot_libdir(*compiler, target).join("self-contained")
-    };
+    let libdir_self_contained = builder.sysroot_libdir(*compiler, target).join("self-contained");
     t!(fs::create_dir_all(&libdir_self_contained));
     let mut target_deps = vec![];
 
@@ -212,7 +209,7 @@ fn copy_self_contained_objects(
 
 /// Configure cargo to compile the standard library, adding appropriate env vars
 /// and such.
-pub fn std_cargo(builder: &Builder<'_>, target: Interned<String>, stage: u32, cargo: &mut Cargo) {
+pub fn std_cargo(builder: &Builder<'_>, target: TargetSelection, stage: u32, cargo: &mut Cargo) {
     if let Some(target) = env::var_os("MACOSX_STD_DEPLOYMENT_TARGET") {
         cargo.env("MACOSX_DEPLOYMENT_TARGET", target);
     }
@@ -250,7 +247,7 @@ pub fn std_cargo(builder: &Builder<'_>, target: Interned<String>, stage: u32, ca
         cargo
             .args(&["-p", "alloc"])
             .arg("--manifest-path")
-            .arg(builder.src.join("src/liballoc/Cargo.toml"))
+            .arg(builder.src.join("library/alloc/Cargo.toml"))
             .arg("--features")
             .arg("compiler-builtins-mem compiler-builtins-c");
     } else {
@@ -261,7 +258,7 @@ pub fn std_cargo(builder: &Builder<'_>, target: Interned<String>, stage: u32, ca
             .arg("--features")
             .arg(features)
             .arg("--manifest-path")
-            .arg(builder.src.join("src/libtest/Cargo.toml"));
+            .arg(builder.src.join("library/test/Cargo.toml"));
 
         // Help the libc crate compile by assisting it in finding various
         // sysroot native libraries.
@@ -307,7 +304,7 @@ pub fn std_cargo(builder: &Builder<'_>, target: Interned<String>, stage: u32, ca
 struct StdLink {
     pub compiler: Compiler,
     pub target_compiler: Compiler,
-    pub target: Interned<String>,
+    pub target: TargetSelection,
 }
 
 impl Step for StdLink {
@@ -343,7 +340,7 @@ impl Step for StdLink {
 fn copy_sanitizers(
     builder: &Builder<'_>,
     compiler: &Compiler,
-    target: Interned<String>,
+    target: TargetSelection,
 ) -> Vec<PathBuf> {
     let runtimes: Vec<native::SanitizerRuntime> = builder.ensure(native::Sanitizers { target });
 
@@ -378,19 +375,19 @@ fn copy_sanitizers(
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
 pub struct StartupObjects {
     pub compiler: Compiler,
-    pub target: Interned<String>,
+    pub target: TargetSelection,
 }
 
 impl Step for StartupObjects {
     type Output = Vec<(PathBuf, DependencyType)>;
 
     fn should_run(run: ShouldRun<'_>) -> ShouldRun<'_> {
-        run.path("src/rtstartup")
+        run.path("library/rtstartup")
     }
 
     fn make_run(run: RunConfig<'_>) {
         run.builder.ensure(StartupObjects {
-            compiler: run.builder.compiler(run.builder.top_stage, run.host),
+            compiler: run.builder.compiler(run.builder.top_stage, run.build_triple()),
             target: run.target,
         });
     }
@@ -410,7 +407,7 @@ impl Step for StartupObjects {
 
         let mut target_deps = vec![];
 
-        let src_dir = &builder.src.join("src/rtstartup");
+        let src_dir = &builder.src.join("library").join("rtstartup");
         let dst_dir = &builder.native_dir(target).join("rtstartup");
         let sysroot_dir = &builder.sysroot_libdir(for_compiler, target);
         t!(fs::create_dir_all(dst_dir));
@@ -425,7 +422,7 @@ impl Step for StartupObjects {
                         .arg("--cfg")
                         .arg("bootstrap")
                         .arg("--target")
-                        .arg(target)
+                        .arg(target.rustc_target_arg())
                         .arg("--emit=obj")
                         .arg("-o")
                         .arg(dst_file)
@@ -444,22 +441,22 @@ impl Step for StartupObjects {
 
 #[derive(Debug, PartialOrd, Ord, Copy, Clone, PartialEq, Eq, Hash)]
 pub struct Rustc {
-    pub target: Interned<String>,
+    pub target: TargetSelection,
     pub compiler: Compiler,
 }
 
 impl Step for Rustc {
     type Output = ();
     const ONLY_HOSTS: bool = true;
-    const DEFAULT: bool = true;
+    const DEFAULT: bool = false;
 
     fn should_run(run: ShouldRun<'_>) -> ShouldRun<'_> {
-        run.all_krates("rustc-main")
+        run.path("compiler/rustc")
     }
 
     fn make_run(run: RunConfig<'_>) {
         run.builder.ensure(Rustc {
-            compiler: run.builder.compiler(run.builder.top_stage, run.host),
+            compiler: run.builder.compiler(run.builder.top_stage, run.build_triple()),
             target: run.target,
         });
     }
@@ -477,6 +474,7 @@ impl Step for Rustc {
 
         if builder.config.keep_stage.contains(&compiler.stage) {
             builder.info("Warning: Using a potentially old librustc. This may not behave well.");
+            builder.info("Warning: Use `--keep-stage-std` if you want to rebuild the compiler when it changes");
             builder.ensure(RustcLink { compiler, target_compiler: compiler, target });
             return;
         }
@@ -524,16 +522,16 @@ impl Step for Rustc {
     }
 }
 
-pub fn rustc_cargo(builder: &Builder<'_>, cargo: &mut Cargo, target: Interned<String>) {
+pub fn rustc_cargo(builder: &Builder<'_>, cargo: &mut Cargo, target: TargetSelection) {
     cargo
         .arg("--features")
         .arg(builder.rustc_features())
         .arg("--manifest-path")
-        .arg(builder.src.join("src/rustc/Cargo.toml"));
+        .arg(builder.src.join("compiler/rustc/Cargo.toml"));
     rustc_cargo_env(builder, cargo, target);
 }
 
-pub fn rustc_cargo_env(builder: &Builder<'_>, cargo: &mut Cargo, target: Interned<String>) {
+pub fn rustc_cargo_env(builder: &Builder<'_>, cargo: &mut Cargo, target: TargetSelection) {
     // Set some configuration variables picked up by build scripts and
     // the compiler alike
     cargo
@@ -565,7 +563,7 @@ pub fn rustc_cargo_env(builder: &Builder<'_>, cargo: &mut Cargo, target: Interne
     }
 
     // Pass down configuration from the LLVM build into the build of
-    // librustc_llvm and librustc_codegen_llvm.
+    // rustc_llvm and rustc_codegen_llvm.
     //
     // Note that this is disabled if LLVM itself is disabled or we're in a check
     // build. If we are in a check build we still go ahead here presuming we've
@@ -584,7 +582,7 @@ pub fn rustc_cargo_env(builder: &Builder<'_>, cargo: &mut Cargo, target: Interne
         if let Some(s) = target_config.and_then(|c| c.llvm_config.as_ref()) {
             cargo.env("CFG_LLVM_ROOT", s);
         }
-        // Some LLVM linker flags (-L and -l) may be needed to link librustc_llvm.
+        // Some LLVM linker flags (-L and -l) may be needed to link rustc_llvm.
         if let Some(ref s) = builder.config.llvm_ldflags {
             cargo.env("LLVM_LINKER_FLAGS", s);
         }
@@ -598,7 +596,7 @@ pub fn rustc_cargo_env(builder: &Builder<'_>, cargo: &mut Cargo, target: Interne
             let file = compiler_file(builder, builder.cxx(target).unwrap(), target, "libstdc++.a");
             cargo.env("LLVM_STATIC_STDCPP", file);
         }
-        if builder.config.llvm_link_shared || builder.config.llvm_thin_lto {
+        if builder.config.llvm_link_shared {
             cargo.env("LLVM_LINK_SHARED", "1");
         }
         if builder.config.llvm_use_libcxx {
@@ -614,7 +612,7 @@ pub fn rustc_cargo_env(builder: &Builder<'_>, cargo: &mut Cargo, target: Interne
 struct RustcLink {
     pub compiler: Compiler,
     pub target_compiler: Compiler,
-    pub target: Interned<String>,
+    pub target: TargetSelection,
 }
 
 impl Step for RustcLink {
@@ -644,11 +642,7 @@ impl Step for RustcLink {
 
 /// Cargo's output path for the standard library in a given stage, compiled
 /// by a particular compiler for the specified target.
-pub fn libstd_stamp(
-    builder: &Builder<'_>,
-    compiler: Compiler,
-    target: Interned<String>,
-) -> PathBuf {
+pub fn libstd_stamp(builder: &Builder<'_>, compiler: Compiler, target: TargetSelection) -> PathBuf {
     builder.cargo_out(compiler, Mode::Std, target).join(".libstd.stamp")
 }
 
@@ -657,7 +651,7 @@ pub fn libstd_stamp(
 pub fn librustc_stamp(
     builder: &Builder<'_>,
     compiler: Compiler,
-    target: Interned<String>,
+    target: TargetSelection,
 ) -> PathBuf {
     builder.cargo_out(compiler, Mode::Rustc, target).join(".librustc.stamp")
 }
@@ -665,7 +659,7 @@ pub fn librustc_stamp(
 pub fn compiler_file(
     builder: &Builder<'_>,
     compiler: &Path,
-    target: Interned<String>,
+    target: TargetSelection,
     file: &str,
 ) -> PathBuf {
     let mut cmd = Command::new(compiler);
@@ -696,9 +690,9 @@ impl Step for Sysroot {
     fn run(self, builder: &Builder<'_>) -> Interned<PathBuf> {
         let compiler = self.compiler;
         let sysroot = if compiler.stage == 0 {
-            builder.out.join(&compiler.host).join("stage0-sysroot")
+            builder.out.join(&compiler.host.triple).join("stage0-sysroot")
         } else {
-            builder.out.join(&compiler.host).join(format!("stage{}", compiler.stage))
+            builder.out.join(&compiler.host.triple).join(format!("stage{}", compiler.stage))
         };
         let _ = fs::remove_dir_all(&sysroot);
         t!(fs::create_dir_all(&sysroot));
@@ -812,8 +806,8 @@ impl Step for Assemble {
 
         let libdir = builder.sysroot_libdir(target_compiler, target_compiler.host);
         if let Some(lld_install) = lld_install {
-            let src_exe = exe("lld", &target_compiler.host);
-            let dst_exe = exe("rust-lld", &target_compiler.host);
+            let src_exe = exe("lld", target_compiler.host);
+            let dst_exe = exe("rust-lld", target_compiler.host);
             // we prepend this bin directory to the user PATH when linking Rust binaries. To
             // avoid shadowing the system LLD we rename the LLD we provide to `rust-lld`.
             let dst = libdir.parent().unwrap().join("bin");
@@ -828,7 +822,7 @@ impl Step for Assemble {
 
         // Link the compiler binary itself into place
         let out_dir = builder.cargo_out(build_compiler, Mode::Rustc, host);
-        let rustc = out_dir.join(exe("rustc_binary", &*host));
+        let rustc = out_dir.join(exe("rustc-main", host));
         let bindir = sysroot.join("bin");
         t!(fs::create_dir_all(&bindir));
         let compiler = builder.rustc(target_compiler);
@@ -963,10 +957,11 @@ pub fn run_cargo(
         .collect::<Vec<_>>();
     for (prefix, extension, expected_len) in toplevel {
         let candidates = contents.iter().filter(|&&(_, ref filename, ref meta)| {
-            filename.starts_with(&prefix[..])
-                && filename[prefix.len()..].starts_with('-')
-                && filename.ends_with(&extension[..])
-                && meta.len() == expected_len
+            meta.len() == expected_len
+                && filename
+                    .strip_prefix(&prefix[..])
+                    .map(|s| s.starts_with('-') && s.ends_with(&extension[..]))
+                    .unwrap_or(false)
         });
         let max = candidates
             .max_by_key(|&&(_, _, ref metadata)| FileTime::from_last_modification_time(metadata));

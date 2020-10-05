@@ -5,7 +5,7 @@ use rustc_session::{declare_lint_pass, declare_tool_lint};
 
 use crate::utils::{
     get_trait_def_id, implements_trait, is_type_diagnostic_item, paths, return_ty, span_lint_and_help,
-    trait_ref_of_method, walk_ptrs_ty,
+    trait_ref_of_method,
 };
 
 declare_clippy_lint! {
@@ -92,8 +92,8 @@ declare_clippy_lint! {
 
 declare_lint_pass!(InherentToString => [INHERENT_TO_STRING, INHERENT_TO_STRING_SHADOW_DISPLAY]);
 
-impl<'a, 'tcx> LateLintPass<'a, 'tcx> for InherentToString {
-    fn check_impl_item(&mut self, cx: &LateContext<'a, 'tcx>, impl_item: &'tcx ImplItem<'_>) {
+impl<'tcx> LateLintPass<'tcx> for InherentToString {
+    fn check_impl_item(&mut self, cx: &LateContext<'tcx>, impl_item: &'tcx ImplItem<'_>) {
         if impl_item.span.from_expansion() {
             return;
         }
@@ -119,13 +119,13 @@ impl<'a, 'tcx> LateLintPass<'a, 'tcx> for InherentToString {
     }
 }
 
-fn show_lint(cx: &LateContext<'_, '_>, item: &ImplItem<'_>) {
+fn show_lint(cx: &LateContext<'_>, item: &ImplItem<'_>) {
     let display_trait_id = get_trait_def_id(cx, &paths::DISPLAY_TRAIT).expect("Failed to get trait ID of `Display`!");
 
     // Get the real type of 'self'
     let fn_def_id = cx.tcx.hir().local_def_id(item.hir_id);
     let self_type = cx.tcx.fn_sig(fn_def_id).input(0);
-    let self_type = walk_ptrs_ty(self_type.skip_binder());
+    let self_type = self_type.skip_binder().peel_refs();
 
     // Emit either a warning or an error
     if implements_trait(cx, self_type, display_trait_id, &[]) {

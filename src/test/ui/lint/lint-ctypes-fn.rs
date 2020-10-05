@@ -71,7 +71,8 @@ pub extern "C" fn str_type(p: &str) { }
 //~^ ERROR: uses type `str`
 
 pub extern "C" fn box_type(p: Box<u32>) { }
-//~^ ERROR uses type `std::boxed::Box<u32>`
+
+pub extern "C" fn opt_box_type(p: Option<Box<u32>>) { }
 
 pub extern "C" fn char_type(p: char) { }
 //~^ ERROR uses type `char`
@@ -95,7 +96,7 @@ pub extern "C" fn zero_size_phantom(p: ZeroSizeWithPhantomData) { }
 //~^ ERROR uses type `ZeroSizeWithPhantomData`
 
 pub extern "C" fn zero_size_phantom_toplevel() -> PhantomData<bool> {
-//~^ ERROR uses type `std::marker::PhantomData<bool>`
+//~^ ERROR uses type `PhantomData<bool>`
     Default::default()
 }
 
@@ -106,7 +107,6 @@ pub extern "C" fn fn_type2(p: fn()) { }
 //~^ ERROR uses type `fn()`
 
 pub extern "C" fn fn_contained(p: RustBadRet) { }
-//~^ ERROR: uses type `std::boxed::Box<u32>`
 
 pub extern "C" fn transparent_i128(p: TransparentI128) { }
 //~^ ERROR: uses type `i128`
@@ -115,7 +115,6 @@ pub extern "C" fn transparent_str(p: TransparentStr) { }
 //~^ ERROR: uses type `str`
 
 pub extern "C" fn transparent_fn(p: TransparentBadFn) { }
-//~^ ERROR: uses type `std::boxed::Box<u32>`
 
 pub extern "C" fn good3(fptr: Option<extern fn()>) { }
 
@@ -159,7 +158,7 @@ pub extern "C" fn good2(size: *const libc::c_uint) { }
 pub extern "C" fn unused_generic1<T>(size: *const Foo) { }
 
 pub extern "C" fn unused_generic2<T>() -> PhantomData<bool> {
-//~^ ERROR uses type `std::marker::PhantomData<bool>`
+//~^ ERROR uses type `PhantomData<bool>`
     Default::default()
 }
 
@@ -172,10 +171,10 @@ pub extern "C" fn used_generic3<T: Default>() -> T {
 }
 
 pub extern "C" fn used_generic4<T>(x: Vec<T>) { }
-//~^ ERROR: uses type `std::vec::Vec<T>`
+//~^ ERROR: uses type `Vec<T>`
 
 pub extern "C" fn used_generic5<T>() -> Vec<T> {
-//~^ ERROR: uses type `std::vec::Vec<T>`
+//~^ ERROR: uses type `Vec<T>`
     Default::default()
 }
 

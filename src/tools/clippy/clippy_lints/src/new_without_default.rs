@@ -56,9 +56,9 @@ pub struct NewWithoutDefault {
 
 impl_lint_pass!(NewWithoutDefault => [NEW_WITHOUT_DEFAULT]);
 
-impl<'a, 'tcx> LateLintPass<'a, 'tcx> for NewWithoutDefault {
+impl<'tcx> LateLintPass<'tcx> for NewWithoutDefault {
     #[allow(clippy::too_many_lines)]
-    fn check_item(&mut self, cx: &LateContext<'a, 'tcx>, item: &'tcx hir::Item<'_>) {
+    fn check_item(&mut self, cx: &LateContext<'tcx>, item: &'tcx hir::Item<'_>) {
         if let hir::ItemKind::Impl {
             of_trait: None, items, ..
         } = item.kind
@@ -80,10 +80,12 @@ impl<'a, 'tcx> LateLintPass<'a, 'tcx> for NewWithoutDefault {
                             // can't be implemented for unsafe new
                             return;
                         }
-                        if impl_item.generics.params.iter().any(|gen| match gen.kind {
-                            hir::GenericParamKind::Type { .. } => true,
-                            _ => false,
-                        }) {
+                        if impl_item
+                            .generics
+                            .params
+                            .iter()
+                            .any(|gen| matches!(gen.kind, hir::GenericParamKind::Type { .. }))
+                        {
                             // when the result of `new()` depends on a type parameter we should not require
                             // an
                             // impl of `Default`
@@ -101,7 +103,7 @@ impl<'a, 'tcx> LateLintPass<'a, 'tcx> for NewWithoutDefault {
                                         cx.tcx.for_each_impl(default_trait_id, |d| {
                                             if let Some(ty_def) = cx.tcx.type_of(d).ty_adt_def() {
                                                 if let Some(local_def_id) = ty_def.did.as_local() {
-                                                    impls.insert(cx.tcx.hir().as_local_hir_id(local_def_id));
+                                                    impls.insert(cx.tcx.hir().local_def_id_to_hir_id(local_def_id));
                                                 }
                                             }
                                         });

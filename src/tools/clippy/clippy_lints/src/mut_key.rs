@@ -1,4 +1,4 @@
-use crate::utils::{match_def_path, paths, span_lint, trait_ref_of_method, walk_ptrs_ty};
+use crate::utils::{match_def_path, paths, span_lint, trait_ref_of_method};
 use rustc_hir as hir;
 use rustc_lint::{LateContext, LateLintPass};
 use rustc_middle::ty::{Adt, Array, RawPtr, Ref, Slice, Tuple, Ty, TypeAndMut};
@@ -12,8 +12,10 @@ declare_clippy_lint! {
     /// `BtreeSet` rely on either the hash or the order of keys be unchanging,
     /// so having types with interior mutability is a bad idea.
     ///
-    /// **Known problems:** We don't currently account for `Rc` or `Arc`, so
-    /// this may yield false positives.
+    /// **Known problems:** It's correct to use a struct, that contains interior mutability
+    /// as a key, when its `Hash` implementation doesn't access any of the interior mutable types.
+    /// However, this lint is unable to recognize this, so it causes a false positive in theses cases.
+    /// The `bytes` crate is a great example of this.
     ///
     /// **Example:**
     /// ```rust
@@ -51,14 +53,14 @@ declare_clippy_lint! {
 
 declare_lint_pass!(MutableKeyType => [ MUTABLE_KEY_TYPE ]);
 
-impl<'a, 'tcx> LateLintPass<'a, 'tcx> for MutableKeyType {
-    fn check_item(&mut self, cx: &LateContext<'a, 'tcx>, item: &'tcx hir::Item<'tcx>) {
+impl<'tcx> LateLintPass<'tcx> for MutableKeyType {
+    fn check_item(&mut self, cx: &LateContext<'tcx>, item: &'tcx hir::Item<'tcx>) {
         if let hir::ItemKind::Fn(ref sig, ..) = item.kind {
             check_sig(cx, item.hir_id, &sig.decl);
         }
     }
 
-    fn check_impl_item(&mut self, cx: &LateContext<'a, 'tcx>, item: &'tcx hir::ImplItem<'tcx>) {
+    fn check_impl_item(&mut self, cx: &LateContext<'tcx>, item: &'tcx hir::ImplItem<'tcx>) {
         if let hir::ImplItemKind::Fn(ref sig, ..) = item.kind {
             if trait_ref_of_method(cx, item.hir_id).is_none() {
                 check_sig(cx, item.hir_id, &sig.decl);
@@ -66,21 +68,21 @@ impl<'a, 'tcx> LateLintPass<'a, 'tcx> for MutableKeyType {
         }
     }
 
-    fn check_trait_item(&mut self, cx: &LateContext<'a, 'tcx>, item: &'tcx hir::TraitItem<'tcx>) {
+    fn check_trait_item(&mut self, cx: &LateContext<'tcx>, item: &'tcx hir::TraitItem<'tcx>) {
         if let hir::TraitItemKind::Fn(ref sig, ..) = item.kind {
             check_sig(cx, item.hir_id, &sig.decl);
         }
     }
 
-    fn check_local(&mut self, cx: &LateContext<'_, '_>, local: &hir::Local<'_>) {
+    fn check_local(&mut self, cx: &LateContext<'_>, local: &hir::Local<'_>) {
         if let hir::PatKind::Wild = local.pat.kind {
             return;
         }
-        check_ty(cx, local.span, cx.tables().pat_ty(&*local.pat));
+        check_ty(cx, local.span, cx.typeck_results().pat_ty(&*local.pat));
     }
 }
 
-fn check_sig<'a, 'tcx>(cx: &LateContext<'a, 'tcx>, item_hir_id: hir::HirId, decl: &hir::FnDecl<'_>) {
+fn check_sig<'tcx>(cx: &LateContext<'tcx>, item_hir_id: hir::HirId, decl: &hir::FnDecl<'_>) {
     let fn_def_id = cx.tcx.hir().local_def_id(item_hir_id);
     let fn_sig = cx.tcx.fn_sig(fn_def_id);
     for (hir_ty, ty) in decl.inputs.iter().zip(fn_sig.inputs().skip_binder().iter()) {
@@ -95,9 +97,9 @@ fn check_sig<'a, 'tcx>(cx: &LateContext<'a, 'tcx>, item_hir_id: hir::HirId, decl
 
 // We want to lint 1. sets or maps with 2. not immutable key types and 3. no unerased
 // generics (because the compiler cannot ensure immutability for unknown types).
-fn check_ty<'a, 'tcx>(cx: &LateContext<'a, 'tcx>, span: Span, ty: Ty<'tcx>) {
-    let ty = walk_ptrs_ty(ty);
-    if let Adt(def, substs) = ty.kind {
+fn check_ty<'tcx>(cx: &LateContext<'tcx>, span: Span, ty: Ty<'tcx>) {
+    let ty = ty.peel_refs();
+    if let Adt(def, substs) = ty.kind() {
         if [&paths::HASHMAP, &paths::BTREEMAP, &paths::HASHSET, &paths::BTREESET]
             .iter()
             .any(|path| match_def_path(cx, def.did, &**path))
@@ -108,8 +110,8 @@ fn check_ty<'a, 'tcx>(cx: &LateContext<'a, 'tcx>, span: Span, ty: Ty<'tcx>) {
     }
 }
 
-fn is_mutable_type<'a, 'tcx>(cx: &LateContext<'a, 'tcx>, ty: Ty<'tcx>, span: Span) -> bool {
-    match ty.kind {
+fn is_mutable_type<'tcx>(cx: &LateContext<'tcx>, ty: Ty<'tcx>, span: Span) -> bool {
+    match *ty.kind() {
         RawPtr(TypeAndMut { ty: inner_ty, mutbl }) | Ref(_, inner_ty, mutbl) => {
             mutbl == hir::Mutability::Mut || is_mutable_type(cx, inner_ty, span)
         },

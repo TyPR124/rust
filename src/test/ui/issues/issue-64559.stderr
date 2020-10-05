@@ -2,7 +2,7 @@ error[E0382]: use of moved value: `orig`
   --> $DIR/issue-64559.rs:4:20
    |
 LL |     let orig = vec![true];
-   |         ---- move occurs because `orig` has type `std::vec::Vec<bool>`, which does not implement the `Copy` trait
+   |         ---- move occurs because `orig` has type `Vec<bool>`, which does not implement the `Copy` trait
 LL |     for _val in orig {}
    |                 ----
    |                 |
@@ -14,7 +14,7 @@ LL |     let _closure = || orig;
    |                    value used here after move
    |
 note: this function consumes the receiver `self` by taking ownership of it, which moves `orig`
-  --> $SRC_DIR/libcore/iter/traits/collect.rs:LL:COL
+  --> $SRC_DIR/core/src/iter/traits/collect.rs:LL:COL
    |
 LL |     fn into_iter(self) -> Self::IntoIter;
    |                  ^^^^

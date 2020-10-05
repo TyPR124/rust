@@ -7,10 +7,9 @@ use std::process::{exit, Command};
 use build_helper::t;
 
 use crate::builder::{Builder, Cargo as CargoCommand, RunConfig, ShouldRun, Step};
-use crate::cache::Interned;
-use crate::channel;
 use crate::channel::GitInfo;
 use crate::compile;
+use crate::config::TargetSelection;
 use crate::toolstate::ToolState;
 use crate::util::{add_dylib_path, exe};
 use crate::Compiler;
@@ -25,7 +24,7 @@ pub enum SourceType {
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
 struct ToolBuild {
     compiler: Compiler,
-    target: Interned<String>,
+    target: TargetSelection,
     tool: &'static str,
     path: &'static str,
     mode: Mode,
@@ -111,7 +110,7 @@ impl Step for ToolBuild {
                             .and_then(|p| p.file_name())
                             .and_then(|p| p.to_str())
                             .unwrap();
-                        if maybe_target != &*target {
+                        if maybe_target != &*target.triple {
                             continue;
                         }
                     }
@@ -162,13 +161,15 @@ impl Step for ToolBuild {
                 "the following dependencies are duplicated although they \
                       have the same features enabled:"
             );
-            for (id, cur, prev) in duplicates.drain_filter(|(_, cur, prev)| cur.2 == prev.2) {
+            let (same, different): (Vec<_>, Vec<_>) =
+                duplicates.into_iter().partition(|(_, cur, prev)| cur.2 == prev.2);
+            for (id, cur, prev) in same {
                 println!("  {}", id);
                 // same features
                 println!("    `{}` ({:?})\n    `{}` ({:?})", cur.0, cur.1, prev.0, prev.1);
             }
             println!("the following dependencies have different features:");
-            for (id, cur, prev) in duplicates {
+            for (id, cur, prev) in different {
                 println!("  {}", id);
                 let cur_features: HashSet<_> = cur.2.into_iter().collect();
                 let prev_features: HashSet<_> = prev.2.into_iter().collect();
@@ -208,8 +209,8 @@ impl Step for ToolBuild {
             }
         } else {
             let cargo_out =
-                builder.cargo_out(compiler, self.mode, target).join(exe(tool, &compiler.host));
-            let bin = builder.tools_dir(compiler).join(exe(tool, &compiler.host));
+                builder.cargo_out(compiler, self.mode, target).join(exe(tool, compiler.host));
+            let bin = builder.tools_dir(compiler).join(exe(tool, compiler.host));
             builder.copy(&cargo_out, &bin);
             Some(bin)
         }
@@ -220,7 +221,7 @@ pub fn prepare_tool_cargo(
     builder: &Builder<'_>,
     compiler: Compiler,
     mode: Mode,
-    target: Interned<String>,
+    target: TargetSelection,
     command: &'static str,
     path: &'static str,
     source_type: SourceType,
@@ -253,7 +254,7 @@ pub fn prepare_tool_cargo(
     cargo.env("CFG_RELEASE", builder.rust_release());
     cargo.env("CFG_RELEASE_CHANNEL", &builder.config.channel);
     cargo.env("CFG_VERSION", builder.rust_version());
-    cargo.env("CFG_RELEASE_NUM", channel::CFG_RELEASE_NUM);
+    cargo.env("CFG_RELEASE_NUM", &builder.version);
 
     let info = GitInfo::new(builder.config.ignore_git, &dir);
     if let Some(sha) = info.sha() {
@@ -303,7 +304,7 @@ macro_rules! bootstrap_tool {
             #[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
         pub struct $name {
             pub compiler: Compiler,
-            pub target: Interned<String>,
+            pub target: TargetSelection,
         }
 
         impl Step for $name {
@@ -361,12 +362,14 @@ bootstrap_tool!(
     Compiletest, "src/tools/compiletest", "compiletest", is_unstable_tool = true;
     BuildManifest, "src/tools/build-manifest", "build-manifest";
     RemoteTestClient, "src/tools/remote-test-client", "remote-test-client";
+    RustDemangler, "src/tools/rust-demangler", "rust-demangler";
     RustInstaller, "src/tools/rust-installer", "fabricate", is_external_tool = true;
     RustdocTheme, "src/tools/rustdoc-themes", "rustdoc-themes";
     ExpandYamlAnchors, "src/tools/expand-yaml-anchors", "expand-yaml-anchors";
+    LintDocs, "src/tools/lint-docs", "lint-docs";
 );
 
-#[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
+#[derive(Debug, Copy, Clone, Hash, PartialEq, Eq, Ord, PartialOrd)]
 pub struct ErrorIndex {
     pub compiler: Compiler,
 }
@@ -392,9 +395,9 @@ impl Step for ErrorIndex {
     fn make_run(run: RunConfig<'_>) {
         // Compile the error-index in the same stage as rustdoc to avoid
         // recompiling rustdoc twice if we can.
-        let stage = if run.builder.top_stage >= 2 { run.builder.top_stage } else { 0 };
-        run.builder
-            .ensure(ErrorIndex { compiler: run.builder.compiler(stage, run.builder.config.build) });
+        let host = run.builder.config.build;
+        let compiler = run.builder.compiler_for(run.builder.top_stage, host, host);
+        run.builder.ensure(ErrorIndex { compiler });
     }
 
     fn run(self, builder: &Builder<'_>) -> PathBuf {
@@ -416,7 +419,7 @@ impl Step for ErrorIndex {
 #[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
 pub struct RemoteTestServer {
     pub compiler: Compiler,
-    pub target: Interned<String>,
+    pub target: TargetSelection,
 }
 
 impl Step for RemoteTestServer {
@@ -449,7 +452,7 @@ impl Step for RemoteTestServer {
     }
 }
 
-#[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
+#[derive(Debug, Copy, Clone, Hash, PartialEq, Eq, Ord, PartialOrd)]
 pub struct Rustdoc {
     /// This should only ever be 0 or 2.
     /// We sometimes want to reference the "bootstrap" rustdoc, which is why this option is here.
@@ -466,8 +469,13 @@ impl Step for Rustdoc {
     }
 
     fn make_run(run: RunConfig<'_>) {
-        run.builder
-            .ensure(Rustdoc { compiler: run.builder.compiler(run.builder.top_stage, run.host) });
+        run.builder.ensure(Rustdoc {
+            // Note: this is somewhat unique in that we actually want a *target*
+            // compiler here, because rustdoc *is* a compiler. We won't be using
+            // this as the compiler to build with, but rather this is "what
+            // compiler are we producing"?
+            compiler: run.builder.compiler(run.builder.top_stage, run.target),
+        });
     }
 
     fn run(self, builder: &Builder<'_>) -> PathBuf {
@@ -476,7 +484,7 @@ impl Step for Rustdoc {
             if !target_compiler.is_snapshot(builder) {
                 panic!("rustdoc in stage 0 must be snapshot rustdoc");
             }
-            return builder.initial_rustc.with_file_name(exe("rustdoc", &target_compiler.host));
+            return builder.initial_rustc.with_file_name(exe("rustdoc", target_compiler.host));
         }
         let target = target_compiler.host;
         // Similar to `compile::Assemble`, build with the previous stage's compiler. Otherwise
@@ -514,14 +522,14 @@ impl Step for Rustdoc {
         // rustdoc a different name.
         let tool_rustdoc = builder
             .cargo_out(build_compiler, Mode::ToolRustc, target)
-            .join(exe("rustdoc_tool_binary", &target_compiler.host));
+            .join(exe("rustdoc_tool_binary", target_compiler.host));
 
         // don't create a stage0-sysroot/bin directory.
         if target_compiler.stage > 0 {
             let sysroot = builder.sysroot(target_compiler);
             let bindir = sysroot.join("bin");
             t!(fs::create_dir_all(&bindir));
-            let bin_rustdoc = bindir.join(exe("rustdoc", &*target_compiler.host));
+            let bin_rustdoc = bindir.join(exe("rustdoc", target_compiler.host));
             let _ = fs::remove_file(&bin_rustdoc);
             builder.copy(&tool_rustdoc, &bin_rustdoc);
             bin_rustdoc
@@ -534,7 +542,7 @@ impl Step for Rustdoc {
 #[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
 pub struct Cargo {
     pub compiler: Compiler,
-    pub target: Interned<String>,
+    pub target: TargetSelection,
 }
 
 impl Step for Cargo {
@@ -583,7 +591,7 @@ macro_rules! tool_extended {
             #[derive(Debug, Clone, Hash, PartialEq, Eq)]
         pub struct $name {
             pub compiler: Compiler,
-            pub target: Interned<String>,
+            pub target: TargetSelection,
             pub extra_features: Vec<String>,
         }
 
@@ -641,7 +649,7 @@ macro_rules! tool_extended {
     }
 }
 
-// Note: tools need to be also added to `Builder::get_step_descriptions` in `build.rs`
+// Note: tools need to be also added to `Builder::get_step_descriptions` in `builder.rs`
 // to make `./x.py build <tool>` work.
 tool_extended!((self, builder),
     Cargofmt, rustfmt, "src/tools/rustfmt", "cargo-fmt", stable=true, {};
@@ -658,6 +666,7 @@ tool_extended!((self, builder),
         self.extra_features.push("clippy".to_owned());
     };
     Rustfmt, rustfmt, "src/tools/rustfmt", "rustfmt", stable=true, {};
+    RustAnalyzer, rust_analyzer, "src/tools/rust-analyzer/crates/rust-analyzer", "rust-analyzer", stable=false, {};
 );
 
 impl<'a> Builder<'a> {
@@ -695,6 +704,10 @@ impl<'a> Builder<'a> {
         }
 
         add_dylib_path(lib_paths, &mut cmd);
+
+        // Provide a RUSTC for this command to use.
+        cmd.env("RUSTC", &self.initial_rustc);
+
         cmd
     }
 }

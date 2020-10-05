@@ -52,6 +52,11 @@ declare_clippy_lint! {
     /// exclusive ranges, because they essentially add an extra branch that
     /// LLVM may fail to hoist out of the loop.
     ///
+    /// This will cause a warning that cannot be fixed if the consumer of the
+    /// range only accepts a specific range type, instead of the generic
+    /// `RangeBounds` trait
+    /// ([#3307](https://github.com/rust-lang/rust-clippy/issues/3307)).
+    ///
     /// **Example:**
     /// ```rust,ignore
     /// for x..(y+1) { .. }
@@ -72,7 +77,10 @@ declare_clippy_lint! {
     /// **Why is this bad?** The code is more readable with an exclusive range
     /// like `x..y`.
     ///
-    /// **Known problems:** None.
+    /// **Known problems:** This will cause a warning that cannot be fixed if
+    /// the consumer of the range only accepts a specific range type, instead of
+    /// the generic `RangeBounds` trait
+    /// ([#3307](https://github.com/rust-lang/rust-clippy/issues/3307)).
     ///
     /// **Example:**
     /// ```rust,ignore
@@ -83,7 +91,7 @@ declare_clippy_lint! {
     /// for x..y { .. }
     /// ```
     pub RANGE_MINUS_ONE,
-    complexity,
+    pedantic,
     "`x..=(y-1)` reads better as `x..y`"
 }
 
@@ -127,8 +135,8 @@ declare_lint_pass!(Ranges => [
     REVERSED_EMPTY_RANGES,
 ]);
 
-impl<'a, 'tcx> LateLintPass<'a, 'tcx> for Ranges {
-    fn check_expr(&mut self, cx: &LateContext<'a, 'tcx>, expr: &'tcx Expr<'_>) {
+impl<'tcx> LateLintPass<'tcx> for Ranges {
+    fn check_expr(&mut self, cx: &LateContext<'tcx>, expr: &'tcx Expr<'_>) {
         if let ExprKind::MethodCall(ref path, _, ref args, _) = expr.kind {
             let name = path.ident.as_str();
             if name == "zip" && args.len() == 2 {
@@ -139,7 +147,7 @@ impl<'a, 'tcx> LateLintPass<'a, 'tcx> for Ranges {
                     if let ExprKind::MethodCall(ref iter_path, _, ref iter_args , _) = *iter;
                     if iter_path.ident.name == sym!(iter);
                     // range expression in `.zip()` call: `0..x.len()`
-                    if let Some(higher::Range { start: Some(start), end: Some(end), .. }) = higher::range(cx, zip_arg);
+                    if let Some(higher::Range { start: Some(start), end: Some(end), .. }) = higher::range(zip_arg);
                     if is_integer_const(cx, start, 0);
                     // `.len()` call
                     if let ExprKind::MethodCall(ref len_path, _, ref len_args, _) = end.kind;
@@ -152,7 +160,7 @@ impl<'a, 'tcx> LateLintPass<'a, 'tcx> for Ranges {
                          span_lint(cx,
                                    RANGE_ZIP_WITH_LEN,
                                    expr.span,
-                                   &format!("It is more idiomatic to use `{}.iter().enumerate()`",
+                                   &format!("it is more idiomatic to use `{}.iter().enumerate()`",
                                             snippet(cx, iter_args[0].span, "_")));
                     }
                 }
@@ -166,13 +174,13 @@ impl<'a, 'tcx> LateLintPass<'a, 'tcx> for Ranges {
 }
 
 // exclusive range plus one: `x..(y+1)`
-fn check_exclusive_range_plus_one(cx: &LateContext<'_, '_>, expr: &Expr<'_>) {
+fn check_exclusive_range_plus_one(cx: &LateContext<'_>, expr: &Expr<'_>) {
     if_chain! {
         if let Some(higher::Range {
             start,
             end: Some(end),
             limits: RangeLimits::HalfOpen
-        }) = higher::range(cx, expr);
+        }) = higher::range(expr);
         if let Some(y) = y_plus_one(cx, end);
         then {
             let span = if expr.span.from_expansion() {
@@ -215,9 +223,9 @@ fn check_exclusive_range_plus_one(cx: &LateContext<'_, '_>, expr: &Expr<'_>) {
 }
 
 // inclusive range minus one: `x..=(y-1)`
-fn check_inclusive_range_minus_one(cx: &LateContext<'_, '_>, expr: &Expr<'_>) {
+fn check_inclusive_range_minus_one(cx: &LateContext<'_>, expr: &Expr<'_>) {
     if_chain! {
-        if let Some(higher::Range { start, end: Some(end), limits: RangeLimits::Closed }) = higher::range(cx, expr);
+        if let Some(higher::Range { start, end: Some(end), limits: RangeLimits::Closed }) = higher::range(expr);
         if let Some(y) = y_minus_one(cx, end);
         then {
             span_lint_and_then(
@@ -240,8 +248,8 @@ fn check_inclusive_range_minus_one(cx: &LateContext<'_, '_>, expr: &Expr<'_>) {
     }
 }
 
-fn check_reversed_empty_range(cx: &LateContext<'_, '_>, expr: &Expr<'_>) {
-    fn inside_indexing_expr(cx: &LateContext<'_, '_>, expr: &Expr<'_>) -> bool {
+fn check_reversed_empty_range(cx: &LateContext<'_>, expr: &Expr<'_>) {
+    fn inside_indexing_expr(cx: &LateContext<'_>, expr: &Expr<'_>) -> bool {
         matches!(
             get_parent_expr(cx, expr),
             Some(Expr {
@@ -251,7 +259,7 @@ fn check_reversed_empty_range(cx: &LateContext<'_, '_>, expr: &Expr<'_>) {
         )
     }
 
-    fn is_for_loop_arg(cx: &LateContext<'_, '_>, expr: &Expr<'_>) -> bool {
+    fn is_for_loop_arg(cx: &LateContext<'_>, expr: &Expr<'_>) -> bool {
         let mut cur_expr = expr;
         while let Some(parent_expr) = get_parent_expr(cx, cur_expr) {
             match higher::for_loop(parent_expr) {
@@ -271,11 +279,11 @@ fn check_reversed_empty_range(cx: &LateContext<'_, '_>, expr: &Expr<'_>) {
     }
 
     if_chain! {
-        if let Some(higher::Range { start: Some(start), end: Some(end), limits }) = higher::range(cx, expr);
-        let ty = cx.tables().expr_ty(start);
-        if let ty::Int(_) | ty::Uint(_) = ty.kind;
-        if let Some((start_idx, _)) = constant(cx, cx.tables(), start);
-        if let Some((end_idx, _)) = constant(cx, cx.tables(), end);
+        if let Some(higher::Range { start: Some(start), end: Some(end), limits }) = higher::range(expr);
+        let ty = cx.typeck_results().expr_ty(start);
+        if let ty::Int(_) | ty::Uint(_) = ty.kind();
+        if let Some((start_idx, _)) = constant(cx, cx.typeck_results(), start);
+        if let Some((end_idx, _)) = constant(cx, cx.typeck_results(), end);
         if let Some(ordering) = Constant::partial_cmp(cx.tcx, ty, &start_idx, &end_idx);
         if is_empty_range(limits, ordering);
         then {
@@ -320,7 +328,7 @@ fn check_reversed_empty_range(cx: &LateContext<'_, '_>, expr: &Expr<'_>) {
     }
 }
 
-fn y_plus_one<'t>(cx: &LateContext<'_, '_>, expr: &'t Expr<'_>) -> Option<&'t Expr<'t>> {
+fn y_plus_one<'t>(cx: &LateContext<'_>, expr: &'t Expr<'_>) -> Option<&'t Expr<'t>> {
     match expr.kind {
         ExprKind::Binary(
             Spanned {
@@ -341,7 +349,7 @@ fn y_plus_one<'t>(cx: &LateContext<'_, '_>, expr: &'t Expr<'_>) -> Option<&'t Ex
     }
 }
 
-fn y_minus_one<'t>(cx: &LateContext<'_, '_>, expr: &'t Expr<'_>) -> Option<&'t Expr<'t>> {
+fn y_minus_one<'t>(cx: &LateContext<'_>, expr: &'t Expr<'_>) -> Option<&'t Expr<'t>> {
     match expr.kind {
         ExprKind::Binary(
             Spanned {

@@ -357,7 +357,7 @@ pub fn main() {
                 args.extend(vec!["--sysroot".into(), sys_root]);
             };
 
-            return rustc_driver::run_compiler(&args, &mut DefaultCallbacks, None, None);
+            return rustc_driver::run_compiler(&args, &mut DefaultCallbacks, None, None, None);
         }
 
         if orig_args.iter().any(|a| a == "--version" || a == "-V") {
@@ -382,13 +382,8 @@ pub fn main() {
 
         let should_describe_lints = || {
             let args: Vec<_> = env::args().collect();
-            args.windows(2).any(|args| {
-                args[1] == "help"
-                    && match args[0].as_str() {
-                        "-W" | "-A" | "-D" | "-F" => true,
-                        _ => false,
-                    }
-            })
+            args.windows(2)
+                .any(|args| args[1] == "help" && matches!(args[0].as_str(), "-W" | "-A" | "-D" | "-F"))
         };
 
         if !wrapper_mode && should_describe_lints() {
@@ -425,6 +420,6 @@ pub fn main() {
         let mut default = DefaultCallbacks;
         let callbacks: &mut (dyn rustc_driver::Callbacks + Send) =
             if clippy_enabled { &mut clippy } else { &mut default };
-        rustc_driver::run_compiler(&args, callbacks, None, None)
+        rustc_driver::run_compiler(&args, callbacks, None, None, None)
     }))
 }

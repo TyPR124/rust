@@ -49,17 +49,17 @@ fn is_non_trait_box(ty: Ty<'_>) -> bool {
 }
 
 struct EscapeDelegate<'a, 'tcx> {
-    cx: &'a LateContext<'a, 'tcx>,
+    cx: &'a LateContext<'tcx>,
     set: HirIdSet,
     too_large_for_stack: u64,
 }
 
 impl_lint_pass!(BoxedLocal => [BOXED_LOCAL]);
 
-impl<'a, 'tcx> LateLintPass<'a, 'tcx> for BoxedLocal {
+impl<'tcx> LateLintPass<'tcx> for BoxedLocal {
     fn check_fn(
         &mut self,
-        cx: &LateContext<'a, 'tcx>,
+        cx: &LateContext<'tcx>,
         _: intravisit::FnKind<'tcx>,
         _: &'tcx FnDecl<'_>,
         body: &'tcx Body<'_>,
@@ -84,7 +84,7 @@ impl<'a, 'tcx> LateLintPass<'a, 'tcx> for BoxedLocal {
 
         let fn_def_id = cx.tcx.hir().local_def_id(hir_id);
         cx.tcx.infer_ctxt().enter(|infcx| {
-            ExprUseVisitor::new(&mut v, &infcx, fn_def_id, cx.param_env, cx.tables()).consume_body(body);
+            ExprUseVisitor::new(&mut v, &infcx, fn_def_id, cx.param_env, cx.typeck_results()).consume_body(body);
         });
 
         for node in v.set {
@@ -105,10 +105,7 @@ fn is_argument(map: rustc_middle::hir::map::Map<'_>, id: HirId) -> bool {
         _ => return false,
     }
 
-    match map.find(map.get_parent_node(id)) {
-        Some(Node::Param(_)) => true,
-        _ => false,
-    }
+    matches!(map.find(map.get_parent_node(id)), Some(Node::Param(_)))
 }
 
 impl<'a, 'tcx> Delegate<'tcx> for EscapeDelegate<'a, 'tcx> {
@@ -150,7 +147,7 @@ impl<'a, 'tcx> Delegate<'tcx> for EscapeDelegate<'a, 'tcx> {
                     return;
                 }
 
-                if is_non_trait_box(cmt.place.ty) && !self.is_large_box(cmt.place.ty) {
+                if is_non_trait_box(cmt.place.ty()) && !self.is_large_box(cmt.place.ty()) {
                     self.set.insert(cmt.hir_id);
                 }
                 return;
